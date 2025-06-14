@@ -15,7 +15,7 @@ func main() {
 		logrus.Fatalf(("Error initializing Logger : %v"), err)
 	}
 
-	if err := cobra.InitCmd(); err != nil {
+	if err := cobra.ExecuteCmd(); err != nil {
 		logrus.Fatalf("Error executing command: %v", err)
 		os.Exit(1)
 	}
