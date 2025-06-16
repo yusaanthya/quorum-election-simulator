@@ -30,6 +30,7 @@ type Message struct {
 type Quorum struct {
 	members  map[int]*Member
 	strategy ElectionStrategy
+	LeaderID int
 	mu       sync.Mutex
 
 	removed map[int]bool
@@ -50,6 +51,7 @@ func NewQuorum(n int) *Quorum {
 
 func (q *Quorum) Start() {
 	logrus.Infof("Starting quorum with %d members", len(q.members))
+	q.ElectLeader()
 	for _, m := range q.members {
 		go m.Run(q)
 	}
@@ -77,8 +79,24 @@ func (q *Quorum) RemoveMember(id int) {
 	defer q.mu.Unlock()
 	if _, ok := q.members[id]; ok {
 		q.removed[id] = true
+		delete(q.members, id)
 		logrus.Infof(">>> Member %d is officially removed from quorum", id)
+		if id == q.LeaderID {
+			logrus.Infof(">>> Leader %d was killed. Triggering re-election...", id)
+			q.ElectLeader()
+		}
 	}
+}
+
+func (q *Quorum) ElectLeader() {
+	for id, m := range q.members {
+		if m.Alive && !q.removed[id] {
+			q.LeaderID = id
+			logrus.Infof(">>> Member %d elected as Leader", id)
+			return
+		}
+	}
+	logrus.Warn(">>> No alive member to elect as leader")
 }
 
 // type Quorum struct {
