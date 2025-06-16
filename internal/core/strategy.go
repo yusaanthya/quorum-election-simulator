@@ -30,6 +30,7 @@ func (s *MajorityVoteStrategy) HandleRequestVote(from int, targetID int, self *M
 	if !ok || time.Since(last) > HeartbeatTimeout {
 		vote := Message{From: self.ID, To: from, Type: Vote, Payload: targetID}
 		q.members[from].Inbox <- vote
+		logrus.Infof("vote message: %v", vote)
 	}
 }
 
@@ -43,5 +44,6 @@ func (s *MajorityVoteStrategy) HandleVote(from int, targetID int, self *Member, 
 
 	if len(s.votes[targetID]) > len(q.members)/2 {
 		logrus.Infof(">>> Member %d: quorum reached to confirm failure of member %d", self.ID, targetID)
+		q.RemoveMember(targetID)
 	}
 }

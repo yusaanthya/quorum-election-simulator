@@ -71,7 +71,11 @@ func (m *Member) monitorHeartbeats(q *Quorum) {
 			now := time.Now()
 			for id, last := range m.lastSeen {
 				if now.Sub(last) > HeartbeatTimeout {
-					suspects = append(suspects, id)
+					q.mu.Lock()
+					if !q.removed[id] {
+						suspects = append(suspects, id)
+					}
+					q.mu.Unlock()
 				}
 			}
 			m.mu.Unlock()

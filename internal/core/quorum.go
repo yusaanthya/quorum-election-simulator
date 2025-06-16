@@ -31,6 +31,8 @@ type Quorum struct {
 	members  map[int]*Member
 	strategy ElectionStrategy
 	mu       sync.Mutex
+
+	removed map[int]bool
 }
 
 func NewQuorum(n int) *Quorum {
@@ -42,6 +44,7 @@ func NewQuorum(n int) *Quorum {
 	return &Quorum{
 		members:  members,
 		strategy: strategy,
+		removed:  make(map[int]bool),
 	}
 }
 
@@ -57,15 +60,24 @@ func (q *Quorum) KillMember(id int) {
 	defer q.mu.Unlock()
 	if m, ok := q.members[id]; ok && m.Alive {
 		m.Stop()
-		logrus.Infof("Member %d is now unresponsive", id)
+		// logrus.Infof("Member %d is now unresponsive", id)
 	}
 }
 
 func (q *Quorum) Broadcast(msg Message) {
 	for _, m := range q.members {
-		if m.ID != msg.From && m.Alive {
+		if m.ID != msg.From && m.Alive && !q.removed[m.ID] {
 			m.Inbox <- msg
 		}
+	}
+}
+
+func (q *Quorum) RemoveMember(id int) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if _, ok := q.members[id]; ok {
+		q.removed[id] = true
+		logrus.Infof(">>> Member %d is officially removed from quorum", id)
 	}
 }
 
