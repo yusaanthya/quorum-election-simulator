@@ -62,7 +62,6 @@ func (q *Quorum) KillMember(id int) {
 	defer q.mu.Unlock()
 	if m, ok := q.members[id]; ok && m.Alive {
 		m.Stop()
-		// logrus.Infof("Member %d is now unresponsive", id)
 	}
 }
 
@@ -80,9 +79,9 @@ func (q *Quorum) RemoveMember(id int) {
 	if _, ok := q.members[id]; ok {
 		q.removed[id] = true
 		delete(q.members, id)
-		logrus.Infof(">>> Member %d is officially removed from quorum", id)
+		logrus.Infof("Member %d is officially removed from quorum", id)
 		if id == q.LeaderID {
-			logrus.Infof(">>> Leader %d was killed. Triggering re-election...", id)
+			logrus.Infof("Leader %d was killed. Triggering re-election...", id)
 			q.ElectLeader()
 		}
 	}
@@ -92,11 +91,11 @@ func (q *Quorum) ElectLeader() {
 	for id, m := range q.members {
 		if m.Alive && !q.removed[id] {
 			q.LeaderID = id
-			logrus.Infof(">>> Member %d elected as Leader", id)
+			logrus.Infof("Member %d elected as Leader", id)
 			return
 		}
 	}
-	logrus.Warn(">>> No alive member to elect as leader")
+	logrus.Warn("No alive member to elect as leader")
 }
 
 // type Quorum struct {

@@ -30,7 +30,6 @@ func (s *MajorityVoteStrategy) HandleRequestVote(from int, targetID int, self *M
 	if !ok || time.Since(last) > HeartbeatTimeout {
 		vote := Message{From: self.ID, To: from, Type: Vote, Payload: targetID}
 		q.members[from].Inbox <- vote
-		logrus.Infof("vote message: %v", vote)
 	}
 }
 
