@@ -65,6 +65,7 @@ func (q *Quorum) Start() {
 	}
 }
 
+// stop target member's heartbeat
 func (q *Quorum) KillMember(id int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -81,9 +82,11 @@ func (q *Quorum) Broadcast(msg Message) {
 	}
 }
 
+// remove dead member from quorum
 func (q *Quorum) RemoveMember(id int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
 	if _, ok := q.members[id]; ok {
 		q.removed[id] = true
 		delete(q.members, id)
@@ -91,6 +94,11 @@ func (q *Quorum) RemoveMember(id int) {
 		if id == q.LeaderID {
 			logrus.Infof("Leader %d was killed. Triggering re-election...", id)
 			q.ElectLeader()
+		}
+		logrus.Debugf("Current members: %v , removed member: %v", q.members, q.removed)
+		if len(q.members) <= 1 {
+			logrus.Info("Only 1 member left, end the game")
+			q.cancel()
 		}
 	}
 }
@@ -104,4 +112,21 @@ func (q *Quorum) ElectLeader() {
 		}
 	}
 	logrus.Warn("No alive member to elect as leader")
+}
+
+func (q *Quorum) Stop() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	logrus.Info("Stopping quorum...")
+	for _, m := range q.members {
+		if m.Alive {
+			m.Stop()
+		}
+	}
+	q.cancel()
+}
+
+func (q *Quorum) Done() <-chan struct{} {
+	return q.ctx.Done()
 }

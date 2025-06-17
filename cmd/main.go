@@ -14,9 +14,8 @@ import (
 )
 
 func main() {
-
-	if err := logger.InitLogger(config.LogLevelInfo); err != nil {
-		logrus.Fatalf(("Error initializing Logger : %v"), err)
+	if err := logger.InitLogger(config.LogLevelDebug); err != nil {
+		logrus.Fatalf("Error initializing Logger : %v", err)
 	}
 
 	if err := cobra.ExecuteCmd(); err != nil {
@@ -24,28 +23,47 @@ func main() {
 		os.Exit(1)
 	}
 
-	// main mechanism
-	members := 3 // TODO: make this default var as input
-	quorum := core.NewQuorum(members)
-	quorum.Start()
-
 	reader := bufio.NewReader(os.Stdin)
+
+	var quorum *core.Quorum
+	var members = 3 // default
+
+restartLoop:
 	for {
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(input)
-		if input == "exit" {
-			break
-		} else if strings.HasPrefix(input, "kill ") {
-			parts := strings.Split(input, " ")
-			if len(parts) == 2 {
-				id, err := strconv.Atoi(parts[1])
-				if err == nil {
-					quorum.KillMember(id)
+		quorum = core.NewQuorum(members)
+		quorum.Start()
+
+	mainLoop:
+		for {
+			select {
+			case <-quorum.Done():
+				logrus.Info("Quorum ended. Returning to main loop.")
+				break mainLoop
+			default:
+				input, _ := reader.ReadString('\n')
+				input = strings.TrimSpace(input)
+
+				switch {
+				case input == "exit":
+					logrus.Info("Exiting CLI...")
+					quorum.Stop()
+					return
+				case input == "restart":
+					logrus.Info("Restarting quorum...")
+					quorum.Stop()
+					continue restartLoop
+				case strings.HasPrefix(input, "kill "):
+					parts := strings.Split(input, " ")
+					if len(parts) == 2 {
+						id, err := strconv.Atoi(parts[1])
+						if err == nil {
+							quorum.KillMember(id)
+						}
+					}
+				default:
+					logrus.Error("Unknown command")
 				}
 			}
-		} else {
-			logrus.Error("Unknown command")
 		}
 	}
-
 }
