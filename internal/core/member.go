@@ -80,9 +80,39 @@ func (m *Member) monitorHeartbeats(q *Quorum) {
 			}
 			m.mu.Unlock()
 			for _, id := range suspects {
+				logrus.Debugf("current member: %v", q.members)
+
+				if q.LeaderID == m.ID {
+					now := time.Now()
+					strategy, ok := m.Election.(*MajorityVoteStrategy)
+					if ok {
+						strategy.voteMutex.Lock()
+						for _, id := range suspects {
+							ts, exists := strategy.voteTimestamps[id]
+							if exists && now.Sub(ts) > VoteDecisionTimeout {
+								if len(strategy.votes[id]) == 0 {
+									logrus.Warnf("Leader %d: No votes received for suspect %d after timeout. Forcibly removing.", m.ID, id)
+									q.RemoveMember(id)
+								}
+							}
+						}
+						strategy.voteMutex.Unlock()
+					}
+				}
 				logrus.Infof("Member %d: suspecting member %d failed", m.ID, id)
 				voteReq := Message{From: m.ID, Type: RequestVote, Payload: id}
 				q.Broadcast(voteReq)
+
+				// write vote record
+				strategy, ok := m.Election.(*MajorityVoteStrategy)
+				if ok {
+					logrus.Debugf("target time stamp: %v", strategy.voteTimestamps[id])
+					strategy.voteMutex.Lock()
+					if _, exists := strategy.voteTimestamps[id]; !exists {
+						strategy.voteTimestamps[id] = time.Now()
+					}
+					strategy.voteMutex.Unlock()
+				}
 			}
 		case <-m.stopChan:
 			return
