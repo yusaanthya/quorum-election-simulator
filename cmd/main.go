@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	if err := logger.InitLogger(config.LogLevelDebug); err != nil {
+	if err := logger.InitLogger(config.LogLevelInfo); err != nil {
 		logrus.Fatalf("Error initializing Logger : %v", err)
 	}
 
@@ -26,7 +26,7 @@ func main() {
 	reader := bufio.NewReader(os.Stdin)
 
 	var quorum *core.Quorum
-	var members = 3 // default
+	var members = cobra.GetMembers()
 
 restartLoop:
 	for {

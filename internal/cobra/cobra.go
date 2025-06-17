@@ -6,24 +6,28 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "app",
-	Short: "A base CLI app with Cobra and logrus",
-	Run: func(cmd *cobra.Command, args []string) {
-		logrus.Debugf("Hello from the base CLI app!")
-	},
-}
+var (
+	members int
+	rootCmd = &cobra.Command{
+		Use:   "app",
+		Short: "A base CLI app with Cobra and logrus",
+		Run: func(cmd *cobra.Command, args []string) {
+			logrus.Debugf("Hello from the base CLI app!")
+		},
+	}
 
-var versionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Print version info",
-	Run: func(cmd *cobra.Command, args []string) {
-		logrus.Infof("Version: %s\n", config.Version)
-	},
-}
+	versionCmd = &cobra.Command{
+		Use:   "version",
+		Short: "Print version info",
+		Run: func(cmd *cobra.Command, args []string) {
+			logrus.Infof("Version: %s\n", config.Version)
+		},
+	}
+)
 
 func InitCLI() *cobra.Command {
 
+	rootCmd.PersistentFlags().IntVarP(&members, "members", "m", 3, "Initial number of quorum members")
 	rootCmd.AddCommand(versionCmd)
 
 	return rootCmd
@@ -33,4 +37,8 @@ func ExecuteCmd() error {
 
 	return InitCLI().Execute()
 
+}
+
+func GetMembers() int {
+	return members
 }
