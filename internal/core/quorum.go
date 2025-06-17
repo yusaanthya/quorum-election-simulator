@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -35,18 +36,24 @@ type Quorum struct {
 	mu       sync.Mutex
 
 	removed map[int]bool
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func NewQuorum(n int) *Quorum {
+	ctx, cancel := context.WithCancel(context.Background())
 	strategy := NewMajorityVoteStrategy()
 	members := make(map[int]*Member)
 	for i := 0; i < n; i++ {
-		members[i] = NewMember(i, strategy)
+		members[i] = NewMember(ctx, i, strategy)
 	}
 	return &Quorum{
 		members:  members,
 		strategy: strategy,
 		removed:  make(map[int]bool),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 }
 

@@ -21,8 +21,8 @@ type Member struct {
 	Election ElectionStrategy
 }
 
-func NewMember(id int, strategy ElectionStrategy) *Member {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewMember(ctx context.Context, id int, strategy ElectionStrategy) *Member {
+	ctx, cancel := context.WithCancel(ctx)
 	logrus.Infof("Member %v: Hi", id)
 	return &Member{
 		ID:       id,
