@@ -139,27 +139,3 @@ func (m *Member) Stop() {
 	m.Alive = false
 	close(m.stopChan)
 }
-
-// type Member struct {
-// 	ID            int
-// 	Alive         bool
-// 	LastHeartbeat time.Time
-// }
-
-// func NewMember(id int) *Member {
-// 	return &Member{ID: id, Alive: true}
-// }
-
-// func (m *Member) StartHeartbeat(q *Quorum) {
-// 	for {
-// 		time.Sleep(2 * time.Second)
-// 		if !m.Alive {
-// 			return
-// 		}
-// 		// heart-beat simulation
-// 		logrus.Infof("Member %d: sending heartbeat\n", m.ID)
-// 		q.mu.Lock()
-// 		m.LastHeartbeat = time.Now()
-// 		q.mu.Unlock()
-// 	}
-// }
