@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -13,19 +14,23 @@ type Member struct {
 	Inbox    chan Message
 	lastSeen map[int]time.Time
 	mu       sync.Mutex
-	stopChan chan struct{}
+
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	Election ElectionStrategy
 }
 
 func NewMember(id int, strategy ElectionStrategy) *Member {
+	ctx, cancel := context.WithCancel(context.Background())
 	logrus.Infof("Member %v: Hi", id)
 	return &Member{
 		ID:       id,
 		Alive:    true,
 		Inbox:    make(chan Message, 10),
 		lastSeen: make(map[int]time.Time),
-		stopChan: make(chan struct{}),
+		ctx:      ctx,
+		cancel:   cancel,
 		Election: strategy,
 	}
 }
@@ -38,7 +43,7 @@ func (m *Member) Run(q *Quorum) {
 		select {
 		case msg := <-m.Inbox:
 			m.handleMessage(msg, q)
-		case <-m.stopChan:
+		case <-m.ctx.Done():
 			return
 		}
 	}
@@ -54,7 +59,7 @@ func (m *Member) sendHeartbeats(q *Quorum) {
 				msg := Message{From: m.ID, Type: Heartbeat}
 				q.Broadcast(msg)
 			}
-		case <-m.stopChan:
+		case <-m.ctx.Done():
 			return
 		}
 	}
@@ -114,7 +119,7 @@ func (m *Member) monitorHeartbeats(q *Quorum) {
 					strategy.voteMutex.Unlock()
 				}
 			}
-		case <-m.stopChan:
+		case <-m.ctx.Done():
 			return
 		}
 	}
@@ -137,5 +142,5 @@ func (m *Member) handleMessage(msg Message, q *Quorum) {
 
 func (m *Member) Stop() {
 	m.Alive = false
-	close(m.stopChan)
+	m.cancel()
 }
