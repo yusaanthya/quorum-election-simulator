@@ -28,9 +28,11 @@ func main() {
 	var quorum *core.Quorum
 	var members = cobra.GetMembers()
 
+	realTimer := core.NewRealTimer()
+
 restartLoop:
 	for {
-		quorum = core.NewQuorum(members)
+		quorum = core.NewQuorum(members, realTimer)
 		quorum.Start()
 
 	mainLoop:

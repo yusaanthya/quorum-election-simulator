@@ -19,9 +19,10 @@ type Member struct {
 	cancel context.CancelFunc
 
 	Election ElectionStrategy
+	timer    Timer
 }
 
-func NewMember(ctx context.Context, id int, strategy ElectionStrategy) *Member {
+func NewMember(ctx context.Context, id int, strategy ElectionStrategy, timer Timer) *Member {
 	ctx, cancel := context.WithCancel(ctx)
 	logrus.Infof("Member %v: Hi", id)
 	return &Member{
@@ -32,6 +33,7 @@ func NewMember(ctx context.Context, id int, strategy ElectionStrategy) *Member {
 		ctx:      ctx,
 		cancel:   cancel,
 		Election: strategy,
+		timer:    timer,
 	}
 }
 
@@ -50,7 +52,7 @@ func (m *Member) Run(q *Quorum) {
 }
 
 func (m *Member) sendHeartbeats(q *Quorum) {
-	ticker := time.NewTicker(HeartbeatInterval)
+	ticker := m.timer.NewTicker(HeartbeatInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -66,7 +68,7 @@ func (m *Member) sendHeartbeats(q *Quorum) {
 }
 
 func (m *Member) monitorHeartbeats(q *Quorum) {
-	ticker := time.NewTicker(HeartbeatTimeout)
+	ticker := m.timer.NewTicker(HeartbeatTimeout / 2)
 	defer ticker.Stop()
 	for {
 		select {
@@ -129,7 +131,7 @@ func (m *Member) handleMessage(msg Message, q *Quorum) {
 	switch msg.Type {
 	case Heartbeat:
 		m.mu.Lock()
-		m.lastSeen[msg.From] = time.Now()
+		m.lastSeen[msg.From] = m.timer.Now()
 		m.mu.Unlock()
 	case RequestVote:
 		targetID := msg.Payload.(int)

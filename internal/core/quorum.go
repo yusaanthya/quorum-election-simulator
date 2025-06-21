@@ -39,14 +39,16 @@ type Quorum struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	timer Timer
 }
 
-func NewQuorum(n int) *Quorum {
+func NewQuorum(n int, timer Timer) *Quorum {
 	ctx, cancel := context.WithCancel(context.Background())
-	strategy := NewMajorityVoteStrategy()
+	strategy := NewMajorityVoteStrategy(timer)
 	members := make(map[int]*Member)
 	for i := 0; i < n; i++ {
-		members[i] = NewMember(ctx, i, strategy)
+		members[i] = NewMember(ctx, i, strategy, timer)
 	}
 	return &Quorum{
 		members:  members,
@@ -54,6 +56,7 @@ func NewQuorum(n int) *Quorum {
 		removed:  make(map[int]bool),
 		ctx:      ctx,
 		cancel:   cancel,
+		timer:    timer,
 	}
 }
 

@@ -16,12 +16,14 @@ type MajorityVoteStrategy struct {
 	votes          map[int]map[int]bool
 	voteTimestamps map[int]time.Time
 	voteMutex      sync.Mutex
+	timer          Timer
 }
 
-func NewMajorityVoteStrategy() *MajorityVoteStrategy {
+func NewMajorityVoteStrategy(timer Timer) *MajorityVoteStrategy {
 	s := &MajorityVoteStrategy{
 		votes:          make(map[int]map[int]bool),
 		voteTimestamps: make(map[int]time.Time),
+		timer:          timer,
 	}
 	go s.cleanupExpiredVotes()
 	return s
@@ -31,7 +33,7 @@ func (s *MajorityVoteStrategy) HandleRequestVote(from int, targetID int, self *M
 	self.mu.Lock()
 	last, ok := self.lastSeen[targetID]
 	self.mu.Unlock()
-	if !ok || time.Since(last) > HeartbeatTimeout {
+	if !ok || s.timer.Now().Sub(last) > HeartbeatTimeout {
 		vote := Message{From: self.ID, To: from, Type: Vote, Payload: targetID}
 		q.members[from].Inbox <- vote
 	}
