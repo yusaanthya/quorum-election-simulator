@@ -7,7 +7,7 @@ import (
 
 func TestNewQuorumInitialization(t *testing.T) {
 	mockTimer := NewMockTimer(time.Now())
-	q := NewQuorum(3, mockTimer)
+	q := NewQuorum(3, mockTimer, NewNoOpNotifier())
 	if len(q.members) != 3 {
 		t.Fatalf("expected 3 members, got %d", len(q.members))
 	}
@@ -22,7 +22,7 @@ func TestNewQuorumInitialization(t *testing.T) {
 
 func TestKillMember(t *testing.T) {
 	mockTimer := NewMockTimer(time.Now())
-	q := NewQuorum(2, mockTimer)
+	q := NewQuorum(2, mockTimer, NewNoOpNotifier())
 	q.Start()
 	q.KillMember(1)
 

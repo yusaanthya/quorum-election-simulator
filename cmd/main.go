@@ -32,7 +32,7 @@ func main() {
 
 restartLoop:
 	for {
-		quorum = core.NewQuorum(members, realTimer)
+		quorum = core.NewQuorum(members, realTimer, core.NewNoOpNotifier())
 		quorum.Start()
 
 	mainLoop:
