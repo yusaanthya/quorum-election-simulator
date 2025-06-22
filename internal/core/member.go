@@ -146,21 +146,32 @@ func (m *Member) monitorHeartbeats(q *Quorum) {
 			for _, id := range suspects {
 				logrus.Infof("Member %d: Suspecting member %d (no heartbeat for %v)", m.ID, id, now.Sub(m.lastSeen[id]))
 
-				// *** EDGE CASE 2-MEMBER QUORUM LEADER FAILURE ***
-				q.mu.Lock()
-				isTargetLeader := q.LeaderID == id
-				currentQuorumSize := len(q.members) // Get the current number of members in the quorum
-				q.mu.Unlock()
+				if strategy, ok := m.Election.(*MajorityVoteStrategy); ok {
+					strategy.voteMutex.Lock()
+					if _, exists := strategy.votes[id]; !exists {
+						strategy.votes[id] = make(map[int]bool)
+					}
+					// Add this member's (m.ID) vote for the suspected member (id)
+					strategy.votes[id][m.ID] = true
+					logrus.Debugf("Member %d: Added own implicit vote for suspect %d. Current votes: %v", m.ID, id, strategy.votes[id])
+					strategy.voteMutex.Unlock()
 
-				// If the suspected member is the current leader AND the quorum size is 2,
-				// it means the leader has failed and the remaining single member cannot form a majority (2 votes needed).
-				// In this specific edge case, the quorum is unrecoverable via majority vote.
-				if isTargetLeader && currentQuorumSize == 2 {
-					logrus.Warnf("Quorum unrecoverable: Leader %d failed and remaining 1-member cannot form majority. Ending quorum.", id)
-					q.cancel()
-					q.notifier.NotifyQuorumEnded()
+					// *** EDGE CASE 2-MEMBER QUORUM LEADER FAILURE ***
+					q.mu.Lock()
+					isTargetLeader := q.LeaderID == id
+					currentQuorumSize := len(q.members) // Get the current number of members in the quorum
+					q.mu.Unlock()
 
-					continue
+					// If the suspected member is the current leader AND the quorum size is 2,
+					// it means the leader has failed and the remaining single member cannot form a majority (2 votes needed).
+					// In this specific edge case, the quorum is unrecoverable via majority vote.
+					if isTargetLeader && currentQuorumSize == 2 {
+						logrus.Warnf("Quorum unrecoverable: Leader %d failed and remaining 1-member cannot form majority. Ending quorum.", id)
+						q.cancel()
+						q.notifier.NotifyQuorumEnded()
+
+						continue
+					}
 				}
 
 				// if the suspecting dispatcher is leader and the vote could not be trigger,  force kill member from quorum

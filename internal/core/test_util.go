@@ -61,42 +61,41 @@ func (m *MockTimer) AdvanceTime(d time.Duration) {
 }
 
 // ========================
-// mock networker for testing
+// mock inbox TestNetworkRouter for testing
 // ========================
-type MockNetworker struct {
-	SentMsgs   chan Message
-	SentToMsgs chan struct {
-		Msg Message
-		To  int
+type TestNetworkRouter struct {
+	q *Quorum
+}
+
+func NewTestNetworkRouter(q *Quorum) *TestNetworkRouter {
+	return &TestNetworkRouter{q: q}
+}
+
+func (r *TestNetworkRouter) Send(msg Message) {
+	r.q.mu.Lock()
+	defer r.q.mu.Unlock()
+	for _, m := range r.q.members {
+		if m.ID != msg.From && m.Alive && !r.q.removed[m.ID] {
+			select {
+			case m.Inbox <- msg:
+			default:
+				logrus.Warnf("TestNetworkRouter: Failed to send broadcast message from %d to %d (type %v): inbox full.", msg.From, m.ID, msg.Type)
+			}
+		}
 	}
 }
 
-func NewMockNetworker() *MockNetworker {
-	return &MockNetworker{
-		SentMsgs: make(chan Message, 100),
-		SentToMsgs: make(chan struct {
-			Msg Message
-			To  int
-		}, 100),
-	}
-}
-
-func (m *MockNetworker) Send(msg Message) {
-	select {
-	case m.SentMsgs <- msg:
-	default:
-		logrus.Warn("MockNetworker.SentMsgs channel full, message dropped.")
-	}
-}
-
-func (m *MockNetworker) SendTo(msg Message, toMemberID int) {
-	select {
-	case m.SentToMsgs <- struct {
-		Msg Message
-		To  int
-	}{Msg: msg, To: toMemberID}:
-	default:
-		logrus.Warn("MockNetworker.SentToMsgs channel full, message dropped.")
+func (r *TestNetworkRouter) SendTo(msg Message, toMemberID int) {
+	r.q.mu.Lock()
+	defer r.q.mu.Unlock()
+	if targetMember, ok := r.q.members[toMemberID]; ok && targetMember.Alive && !r.q.removed[toMemberID] {
+		select {
+		case targetMember.Inbox <- msg:
+		default:
+			logrus.Warnf("TestNetworkRouter: Failed to send direct message from %d to %d (type %v): inbox full.", msg.From, toMemberID, msg.Type)
+		}
+	} else {
+		logrus.Debugf("TestNetworkRouter: Cannot send message from %d to %d (type %v): target not alive or removed.", msg.From, toMemberID, msg.Type)
 	}
 }
 
@@ -111,9 +110,9 @@ type MockNotifier struct {
 
 func NewMockNotifier() *MockNotifier {
 	return &MockNotifier{
-		MemberRemovedCh: make(chan int, 5),
-		LeaderElectedCh: make(chan int, 5),
-		QuorumEndedCh:   make(chan struct{}, 5),
+		MemberRemovedCh: make(chan int, 50),
+		LeaderElectedCh: make(chan int, 50),
+		QuorumEndedCh:   make(chan struct{}, 50),
 	}
 }
 
