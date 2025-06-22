@@ -34,6 +34,7 @@ func (n *noOpNotifier) NotifyQuorumEnded() {
 
 type Networker interface {
 	Send(msg Message)
+	SendTo(msg Message, toMemberID int)
 }
 
 type QuorumNetworker struct {
@@ -46,6 +47,21 @@ func NewQuorumNetworker(q *Quorum) *QuorumNetworker {
 
 func (qn *QuorumNetworker) Send(msg Message) {
 	qn.q.Broadcast(msg)
+}
+func (qn *QuorumNetworker) SendTo(msg Message, toMemberID int) {
+	qn.q.mu.Lock()
+	defer qn.q.mu.Unlock()
+
+	targetMember, ok := qn.q.members[toMemberID]
+	if ok && targetMember.Alive && !qn.q.removed[toMemberID] {
+		select {
+		case targetMember.Inbox <- msg:
+		case <-qn.q.timer.NewTicker(100 * time.Millisecond).C:
+			logrus.Warnf("Failed to send message from %d to %d (type %v): inbox full or blocked.", msg.From, toMemberID, msg.Type)
+		}
+	} else {
+		logrus.Debugf("Cannot send message from %d to %d (type %v): target not alive or removed.", msg.From, toMemberID, msg.Type)
+	}
 }
 
 type Quorum struct {
