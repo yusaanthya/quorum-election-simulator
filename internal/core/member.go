@@ -34,7 +34,6 @@ type Message struct {
 	Payload interface{}
 }
 
-// --- Member 結構與行為 ---
 type Member struct {
 	ID       int
 	Alive    bool
@@ -196,26 +195,22 @@ func (m *Member) monitorHeartbeats(q *Quorum) {
 	}
 }
 
-// handleMessage 處理接收到的訊息
 func (m *Member) handleMessage(msg Message, q *Quorum) {
 	logrus.Debugf("Member %d: Received message from %d, Type: %v, Payload: %v", m.ID, msg.From, msg.Type, msg.Payload)
 	switch msg.Type {
 	case Heartbeat:
 		m.mu.Lock()
-		m.lastSeen[msg.From] = m.timer.Now() // <-- 修正：確保使用注入的 timer 獲取時間
+		m.lastSeen[msg.From] = m.timer.Now()
 		m.mu.Unlock()
 	case RequestVote:
 		targetID := msg.Payload.(int)
-		// 將 Networker 傳遞給 ElectionStrategy 的處理方法，讓策略也能發送訊息
 		m.Election.HandleRequestVote(msg.From, targetID, m, q, m.networker)
 	case Vote:
 		targetID := msg.Payload.(int)
-		// 將 Networker 傳遞給 ElectionStrategy 的處理方法
 		m.Election.HandleVote(msg.From, targetID, m, q, m.networker)
 	}
 }
 
-// Stop 停止成員的運行
 func (m *Member) Stop() {
 	m.Alive = false
 	m.cancel()
