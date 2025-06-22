@@ -80,6 +80,7 @@ func NewQuorum(n int, timer Timer, notifier QuorumEventNotifier) *Quorum {
 		cancel:   cancel,
 		timer:    timer,
 		notifier: notifier,
+		LeaderID: -1,
 	}
 
 	q.networker = NewQuorumNetworker(q)
