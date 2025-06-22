@@ -47,10 +47,11 @@ type Member struct {
 	Election  ElectionStrategy
 	timer     Timer
 	networker Networker
+	wg        *sync.WaitGroup
 }
 
-func NewMember(ctx context.Context, id int, strategy ElectionStrategy, timer Timer, networker Networker, initialPeers []int) *Member {
-	ctx, cancel := context.WithCancel(ctx)
+func NewMember(ctx context.Context, id int, strategy ElectionStrategy, timer Timer, networker Networker, initialPeers []int, wg *sync.WaitGroup) *Member {
+	memberCtx, cancel := context.WithCancel(ctx)
 	logrus.Infof("Member %v: Hi", id)
 
 	m := &Member{
@@ -58,11 +59,12 @@ func NewMember(ctx context.Context, id int, strategy ElectionStrategy, timer Tim
 		Alive:     true,
 		Inbox:     make(chan Message, 10),
 		lastSeen:  make(map[int]time.Time),
-		ctx:       ctx,
+		ctx:       memberCtx,
 		cancel:    cancel,
 		Election:  strategy,
 		timer:     timer,
 		networker: networker,
+		wg:        wg,
 	}
 
 	// init lastSeen to prevent suspecting others immediately
@@ -76,6 +78,8 @@ func NewMember(ctx context.Context, id int, strategy ElectionStrategy, timer Tim
 }
 
 func (m *Member) Run(q *Quorum) {
+	defer m.wg.Done()
+
 	go m.sendHeartbeats()
 	go m.monitorHeartbeats(q)
 
