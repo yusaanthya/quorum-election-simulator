@@ -8,25 +8,44 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const (
-	HeartbeatInterval   = 2 * time.Second
-	HeartbeatTimeout    = 4 * time.Second
-	VoteDecisionTimeout = 2 * HeartbeatTimeout
-)
+type QuorumEventNotifier interface {
+	NotifyMemberRemoved(memberID int)
+	NotifyLeaderElected(leaderID int)
+	NotifyQuorumEnded()
+}
 
-type MessageType int
+type noOpNotifier struct{}
 
-const (
-	Heartbeat MessageType = iota
-	RequestVote
-	Vote
-)
+func NewNoOpNotifier() QuorumEventNotifier {
+	return &noOpNotifier{}
+}
 
-type Message struct {
-	From    int
-	To      int
-	Type    MessageType
-	Payload interface{}
+func (n *noOpNotifier) NotifyMemberRemoved(memberID int) {
+	logrus.Debugf("[NoOpNotifier] Member %d removed.", memberID)
+}
+
+func (n *noOpNotifier) NotifyLeaderElected(leaderID int) {
+	logrus.Debugf("[NoOpNotifier] Leader elected: %d.", leaderID)
+}
+
+func (n *noOpNotifier) NotifyQuorumEnded() {
+	logrus.Debugf("[NoOpNotifier] Quorum ended.")
+}
+
+type Networker interface {
+	Send(msg Message)
+}
+
+type QuorumNetworker struct {
+	q *Quorum
+}
+
+func NewQuorumNetworker(q *Quorum) *QuorumNetworker {
+	return &QuorumNetworker{q: q}
+}
+
+func (qn *QuorumNetworker) Send(msg Message) {
+	qn.q.Broadcast(msg)
 }
 
 type Quorum struct {
@@ -35,29 +54,53 @@ type Quorum struct {
 	LeaderID int
 	mu       sync.Mutex
 
-	removed map[int]bool
+	removed map[int]bool // Stores IDs of officially removed members
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	timer Timer
+
+	notifier  QuorumEventNotifier
+	networker Networker
 }
 
-func NewQuorum(n int) *Quorum {
+func NewQuorum(n int, timer Timer, notifier QuorumEventNotifier) *Quorum {
 	ctx, cancel := context.WithCancel(context.Background())
-	strategy := NewMajorityVoteStrategy()
-	members := make(map[int]*Member)
-	for i := 0; i < n; i++ {
-		members[i] = NewMember(ctx, i, strategy)
+
+	if notifier == nil {
+		notifier = NewNoOpNotifier()
 	}
-	return &Quorum{
-		members:  members,
-		strategy: strategy,
+
+	q := &Quorum{
+		members:  make(map[int]*Member),
+		strategy: nil,
 		removed:  make(map[int]bool),
 		ctx:      ctx,
 		cancel:   cancel,
+		timer:    timer,
+		notifier: notifier,
 	}
+
+	q.networker = NewQuorumNetworker(q)
+
+	strategy := NewMajorityVoteStrategy(ctx, timer, q)
+	q.strategy = strategy
+
+	allMemberIDs := make([]int, 0, n)
+	for i := 0; i < n; i++ {
+		allMemberIDs = append(allMemberIDs, i)
+	}
+
+	for i := 0; i < n; i++ {
+		q.members[i] = NewMember(ctx, i, strategy, timer, q.networker, allMemberIDs)
+	}
+	return q
 }
 
 func (q *Quorum) Start() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	logrus.Infof("Starting quorum with %d members", len(q.members))
 	q.ElectLeader()
 	for _, m := range q.members {
@@ -65,53 +108,90 @@ func (q *Quorum) Start() {
 	}
 }
 
-// stop target member's heartbeat
+// KillMember to stop member's heartbeat
 func (q *Quorum) KillMember(id int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if m, ok := q.members[id]; ok && m.Alive {
 		m.Stop()
+		logrus.Infof("CLI Command: Member %d is now unresponsive (killed).", id)
+	} else {
+		logrus.Warnf("CLI Command: Member %d not found or already dead.", id)
 	}
 }
 
+// Broadcast to every Alive member
 func (q *Quorum) Broadcast(msg Message) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	for _, m := range q.members {
 		if m.ID != msg.From && m.Alive && !q.removed[m.ID] {
-			m.Inbox <- msg
+			select {
+			case m.Inbox <- msg:
+			case <-q.timer.NewTicker(100 * time.Millisecond).C:
+				logrus.Warnf("Failed to send message from %d to %d (type %v): inbox full or blocked.", msg.From, m.ID, msg.Type)
+			}
 		}
 	}
 }
 
-// remove dead member from quorum
-func (q *Quorum) RemoveMember(id int) {
+// ProposeMemberRemoval: leader propose quorum to remove member
+func (q *Quorum) ProposeMemberRemoval(id int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	if _, ok := q.members[id]; ok {
+	if _, ok := q.members[id]; ok && !q.removed[id] {
 		q.removed[id] = true
 		delete(q.members, id)
-		logrus.Infof("Member %d is officially removed from quorum", id)
+		logrus.Infof("Member %d is officially removed from quorum. Current active members: %v", id, len(q.members))
+
+		q.notifier.NotifyMemberRemoved(id)
+
 		if id == q.LeaderID {
-			logrus.Infof("Leader %d was killed. Triggering re-election...", id)
+			logrus.Infof("Leader %d was removed. Triggering re-election...", id)
 			q.ElectLeader()
 		}
-		logrus.Debugf("Current members: %v , removed member: %v", q.members, q.removed)
+		logrus.Debugf("Current active members: %+v, Removed members: %+v", q.getAliveMemberIDs(), q.removed)
+
 		if len(q.members) <= 1 {
-			logrus.Info("Only 1 member left, end the game")
+			logrus.Info("Quorum has fewer than 2 active members. Ending simulation.")
 			q.cancel()
+			q.notifier.NotifyQuorumEnded()
 		}
+	} else {
+		logrus.Debugf("Attempted to remove member %d, but it's not in active members or already marked as removed.", id)
 	}
 }
 
+func (q *Quorum) getAliveMemberIDs() []int {
+	ids := []int{}
+	for id := range q.members {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func (q *Quorum) ElectLeader() {
+
+	var newLeaderID = -1
 	for id, m := range q.members {
 		if m.Alive && !q.removed[id] {
-			q.LeaderID = id
-			logrus.Infof("Member %d elected as Leader", id)
-			return
+			if newLeaderID == -1 || id < newLeaderID {
+				newLeaderID = id
+			}
 		}
 	}
-	logrus.Warn("No alive member to elect as leader")
+
+	if newLeaderID != -1 {
+		q.LeaderID = newLeaderID
+		logrus.Infof("New Leader elected: Member %d", q.LeaderID)
+		q.notifier.NotifyLeaderElected(newLeaderID)
+	} else {
+		q.LeaderID = -1
+		logrus.Warn("No alive member to elect as leader.")
+		q.cancel()
+		q.notifier.NotifyQuorumEnded()
+	}
 }
 
 func (q *Quorum) Stop() {
@@ -125,6 +205,7 @@ func (q *Quorum) Stop() {
 		}
 	}
 	q.cancel()
+	logrus.Info("Quorum stopped.")
 }
 
 func (q *Quorum) Done() <-chan struct{} {
