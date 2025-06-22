@@ -147,6 +147,23 @@ func (m *Member) monitorHeartbeats(q *Quorum) {
 			for _, id := range suspects {
 				logrus.Infof("Member %d: Suspecting member %d (no heartbeat for %v)", m.ID, id, now.Sub(m.lastSeen[id]))
 
+				// *** EDGE CASE 2-MEMBER QUORUM LEADER FAILURE ***
+				q.mu.Lock()
+				isTargetLeader := q.LeaderID == id
+				currentQuorumSize := len(q.members) // Get the current number of members in the quorum
+				q.mu.Unlock()
+
+				// If the suspected member is the current leader AND the quorum size is 2,
+				// it means the leader has failed and the remaining single member cannot form a majority (2 votes needed).
+				// In this specific edge case, the quorum is unrecoverable via majority vote.
+				if isTargetLeader && currentQuorumSize == 2 {
+					logrus.Warnf("Quorum unrecoverable: Leader %d failed and remaining 1-member cannot form majority. Ending quorum.", id)
+					q.cancel()
+					q.notifier.NotifyQuorumEnded()
+
+					continue
+				}
+
 				// if the suspecting dispatcher is leader and the vote could not be trigger,  force kill member from quorum
 				if q.LeaderID == m.ID {
 					strategy, ok := m.Election.(*MajorityVoteStrategy)
