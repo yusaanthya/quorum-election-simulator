@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/Anthya1104/quorum-election-cli/internal/cobra"
 	"github.com/Anthya1104/quorum-election-cli/internal/config"
@@ -32,7 +33,8 @@ func main() {
 
 restartLoop:
 	for {
-		quorum = core.NewQuorum(members, realTimer, core.NewNoOpNotifier())
+		var wg sync.WaitGroup
+		quorum = core.NewQuorum(members, realTimer, core.NewNoOpNotifier(), &wg)
 		quorum.Start()
 
 	mainLoop:

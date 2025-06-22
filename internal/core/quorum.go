@@ -63,9 +63,10 @@ type Quorum struct {
 
 	notifier  QuorumEventNotifier
 	networker Networker
+	wg        *sync.WaitGroup
 }
 
-func NewQuorum(n int, timer Timer, notifier QuorumEventNotifier) *Quorum {
+func NewQuorum(n int, timer Timer, notifier QuorumEventNotifier, wg *sync.WaitGroup) *Quorum {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	if notifier == nil {
@@ -81,11 +82,12 @@ func NewQuorum(n int, timer Timer, notifier QuorumEventNotifier) *Quorum {
 		timer:    timer,
 		notifier: notifier,
 		LeaderID: -1,
+		wg:       wg,
 	}
 
 	q.networker = NewQuorumNetworker(q)
 
-	strategy := NewMajorityVoteStrategy(ctx, timer, q)
+	strategy := NewMajorityVoteStrategy(ctx, timer, q, wg)
 	q.strategy = strategy
 
 	allMemberIDs := make([]int, 0, n)
@@ -94,7 +96,7 @@ func NewQuorum(n int, timer Timer, notifier QuorumEventNotifier) *Quorum {
 	}
 
 	for i := 0; i < n; i++ {
-		q.members[i] = NewMember(ctx, i, strategy, timer, q.networker, allMemberIDs)
+		q.members[i] = NewMember(ctx, i, strategy, timer, q.networker, allMemberIDs, wg)
 	}
 	return q
 }
@@ -105,6 +107,7 @@ func (q *Quorum) Start() {
 	logrus.Infof("Starting quorum with %d members", len(q.members))
 	q.ElectLeader()
 	for _, m := range q.members {
+		q.wg.Add(1)
 		go m.Run(q)
 	}
 }
@@ -206,6 +209,7 @@ func (q *Quorum) Stop() {
 		}
 	}
 	q.cancel()
+	q.wg.Wait()
 	logrus.Info("Quorum stopped.")
 }
 

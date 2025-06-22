@@ -20,16 +20,19 @@ type MajorityVoteStrategy struct {
 	timer          Timer
 	ctx            context.Context
 	quorum         *Quorum
+	wg             *sync.WaitGroup
 }
 
-func NewMajorityVoteStrategy(ctx context.Context, timer Timer, q *Quorum) *MajorityVoteStrategy {
+func NewMajorityVoteStrategy(ctx context.Context, timer Timer, q *Quorum, wg *sync.WaitGroup) *MajorityVoteStrategy {
 	s := &MajorityVoteStrategy{
 		votes:          make(map[int]map[int]bool),
 		voteTimestamps: make(map[int]time.Time),
 		timer:          timer,
 		ctx:            ctx,
 		quorum:         q,
+		wg:             wg,
 	}
+	wg.Add(1)
 	go s.cleanupExpiredVotes()
 	return s
 }
@@ -111,6 +114,8 @@ func (s *MajorityVoteStrategy) HandleVote(from int, targetID int, self *Member, 
 }
 
 func (s *MajorityVoteStrategy) cleanupExpiredVotes() {
+	defer s.wg.Done()
+
 	ticker := s.timer.NewTicker(VoteDecisionTimeout / 2)
 	defer ticker.Stop()
 
