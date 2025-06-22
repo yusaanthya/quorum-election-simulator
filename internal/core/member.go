@@ -51,7 +51,7 @@ type Member struct {
 }
 
 func NewMember(ctx context.Context, id int, strategy ElectionStrategy, timer Timer, networker Networker, initialPeers []int, wg *sync.WaitGroup) *Member {
-	ctx, cancel := context.WithCancel(ctx)
+	memberCtx, cancel := context.WithCancel(ctx)
 	logrus.Infof("Member %v: Hi", id)
 
 	m := &Member{
@@ -59,7 +59,7 @@ func NewMember(ctx context.Context, id int, strategy ElectionStrategy, timer Tim
 		Alive:     true,
 		Inbox:     make(chan Message, 10),
 		lastSeen:  make(map[int]time.Time),
-		ctx:       ctx,
+		ctx:       memberCtx,
 		cancel:    cancel,
 		Election:  strategy,
 		timer:     timer,
