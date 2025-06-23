@@ -191,8 +191,8 @@ func (m *Member) monitorHeartbeats(q *Quorum) {
 					removedMembers := q.removed
 					q.mu.Unlock()
 
-					if !removedMembers[id] && currentQuorumSize == 2 && now.Sub(m.lastSeen[id]) > VoteDecisionTimeout {
-						// simple arrangement for timeout suspecious
+					if !removedMembers[id] && currentQuorumSize <= 2 && now.Sub(m.lastSeen[id]) > VoteDecisionTimeout {
+						// simple arrangement for timeout suspecting event
 						logrus.Warnf("Quorum unrecoverable: Leader %d failed and remaining 1-member cannot form majority. Ending quorum.", id)
 						q.ProposeMemberRemoval(id)
 
