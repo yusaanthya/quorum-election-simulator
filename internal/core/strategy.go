@@ -112,14 +112,41 @@ func (s *MajorityVoteStrategy) cleanupExpiredVotes() {
 		case <-ticker.C:
 			s.voteMutex.Lock()
 			now := s.timer.Now()
+			targetsToClean := []int{} // Temporarily store IDs of targets to clean
 			for targetID, ts := range s.voteTimestamps {
+				// Clean up if the timestamp is older than 2 * VoteDecisionTimeout
+				// (a generous period to ensure all voting members have had a chance to process).
 				if now.Sub(ts) > 2*VoteDecisionTimeout {
 					logrus.Infof("[GC] Vote record for target %d (initiated %v) expired and cleared (no majority reached).", targetID, ts)
-					delete(s.voteTimestamps, targetID)
-					delete(s.votes, targetID)
+					targetsToClean = append(targetsToClean, targetID)
 				}
 			}
 			s.voteMutex.Unlock()
+
+			for _, targetID := range targetsToClean {
+				s.voteMutex.Lock()
+				delete(s.voteTimestamps, targetID)
+				delete(s.votes, targetID)
+				s.voteMutex.Unlock()
+
+				s.quorum.mu.Lock()
+				_, targetStillExists := s.quorum.members[targetID]
+				currentActiveMembersCount := len(s.quorum.members)
+				s.quorum.mu.Unlock()
+
+				// If voting for a suspected member timed out (no majority),
+				// AND that member is still active (not removed by vote),
+				// AND the Quorum size is now too small to function (e.g., <= 1 active member left),
+				// then the Quorum should terminate as it's unrecoverable via majority vote.
+				if targetStillExists && currentActiveMembersCount <= 1 {
+					logrus.Warnf("Quorum unrecoverable: Suspected member %d's vote timed out, and quorum size (%d) makes it unrecoverable. Ending quorum.", targetID, currentActiveMembersCount)
+					s.quorum.quorumEndedOnce.Do(func() {
+						s.quorum.cancel()
+						s.quorum.notifier.NotifyQuorumEnded()
+					})
+				}
+			}
+
 		case <-s.ctx.Done():
 			logrus.Infof("MajorityVoteStrategy: cleanupExpiredVotes goroutine stopped.")
 			return

@@ -80,6 +80,8 @@ type Quorum struct {
 	notifier   QuorumEventNotifier
 	networker  Networker
 	internalWg sync.WaitGroup
+
+	quorumEndedOnce sync.Once
 }
 
 func NewQuorum(n int, timer Timer, notifier QuorumEventNotifier) *Quorum {
@@ -90,15 +92,16 @@ func NewQuorum(n int, timer Timer, notifier QuorumEventNotifier) *Quorum {
 	}
 
 	q := &Quorum{
-		members:    make(map[int]*Member),
-		strategy:   nil,
-		removed:    make(map[int]bool),
-		ctx:        childCtx,
-		cancel:     cancel,
-		timer:      timer,
-		notifier:   notifier,
-		LeaderID:   -1,
-		internalWg: sync.WaitGroup{}, // initialize the internal wg
+		members:         make(map[int]*Member),
+		strategy:        nil,
+		removed:         make(map[int]bool),
+		ctx:             childCtx,
+		cancel:          cancel,
+		timer:           timer,
+		notifier:        notifier,
+		LeaderID:        -1,
+		internalWg:      sync.WaitGroup{}, // initialize the internal wg
+		quorumEndedOnce: sync.Once{},
 	}
 
 	q.networker = NewQuorumNetworker(q)
@@ -167,6 +170,7 @@ func (q *Quorum) ProposeMemberRemoval(id int) {
 
 		q.notifier.NotifyMemberRemoved(id)
 
+		// If the removed member was the leader, trigger a re-election
 		if id == q.LeaderID {
 			logrus.Infof("Leader %d was removed. Triggering re-election...", id)
 			q.ElectLeader()
@@ -174,9 +178,12 @@ func (q *Quorum) ProposeMemberRemoval(id int) {
 		logrus.Debugf("Current active members: %+v, Removed members: %+v", q.getAliveMemberIDs(), q.removed)
 
 		if len(q.members) <= 1 {
-			logrus.Info("Quorum has fewer than 2 active members. Ending simulation.")
-			q.cancel()
-			q.notifier.NotifyQuorumEnded()
+			// Use sync.Once to ensure quorum termination logic is called exactly once.
+			q.quorumEndedOnce.Do(func() {
+				logrus.Info("Quorum has fewer than 2 active members. Ending simulation.")
+				q.cancel()
+				q.notifier.NotifyQuorumEnded()
+			})
 		}
 	} else {
 		logrus.Debugf("Attempted to remove member %d, but it's not in active members or already marked as removed.", id)
@@ -209,8 +216,11 @@ func (q *Quorum) ElectLeader() {
 	} else {
 		q.LeaderID = -1
 		logrus.Warn("No alive member to elect as leader.")
-		q.cancel()
-		q.notifier.NotifyQuorumEnded()
+		// Use sync.Once to ensure quorum termination logic is called exactly once.
+		q.quorumEndedOnce.Do(func() {
+			q.cancel()
+			q.notifier.NotifyQuorumEnded()
+		})
 	}
 }
 
