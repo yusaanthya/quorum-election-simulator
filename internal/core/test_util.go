@@ -103,22 +103,22 @@ func (r *TestNetworkRouter) SendTo(msg Message, toMemberID int) {
 // mock notifier for testing
 // ========================
 type MockNotifier struct {
-	MemberRemovedCh chan int
-	LeaderElectedCh chan int
-	QuorumEndedCh   chan struct{}
+	memberRemovedCh chan int
+	leaderElectedCh chan int
+	quorumEndedCh   chan struct{}
 }
 
 func NewMockNotifier() *MockNotifier {
 	return &MockNotifier{
-		MemberRemovedCh: make(chan int, 50),
-		LeaderElectedCh: make(chan int, 50),
-		QuorumEndedCh:   make(chan struct{}, 50),
+		memberRemovedCh: make(chan int, 50),
+		leaderElectedCh: make(chan int, 50),
+		quorumEndedCh:   make(chan struct{}, 50),
 	}
 }
 
 func (n *MockNotifier) NotifyMemberRemoved(memberID int) {
 	select {
-	case n.MemberRemovedCh <- memberID:
+	case n.memberRemovedCh <- memberID:
 	default:
 		logrus.Warn("MockNotifier.MemberRemovedCh channel full.")
 	}
@@ -126,7 +126,7 @@ func (n *MockNotifier) NotifyMemberRemoved(memberID int) {
 
 func (n *MockNotifier) NotifyLeaderElected(leaderID int) {
 	select {
-	case n.LeaderElectedCh <- leaderID:
+	case n.leaderElectedCh <- leaderID:
 	default:
 		logrus.Warn("MockNotifier.LeaderElectedCh channel full.")
 	}
@@ -134,7 +134,7 @@ func (n *MockNotifier) NotifyLeaderElected(leaderID int) {
 
 func (n *MockNotifier) NotifyQuorumEnded() {
 	select {
-	case n.QuorumEndedCh <- struct{}{}:
+	case n.quorumEndedCh <- struct{}{}:
 	default:
 		logrus.Warn("MockNotifier.QuorumEndedCh channel full.")
 	}

@@ -52,7 +52,6 @@ func TestNewQuorumInitialization(t *testing.T) {
 	q.Stop()
 }
 
-// TODO: currently depends on time.sleep -> unstable test result, might be fail when run all test due to the unmanagable go scheduler run code priorities
 func TestKillMember(t *testing.T) {
 
 	mockTimer := NewMockTimer(time.Now())
@@ -62,10 +61,10 @@ func TestKillMember(t *testing.T) {
 	q.Start()
 
 	// make sure the lastSeen updated
-	mockTimer.AdvanceTime(HeartbeatInterval * 3)
+	mockTimer.AdvanceTime(HeartbeatInterval)
 
 	// leave enough time for go scheduler
-	time.Sleep(3000 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	memberToKillID := 1
 
@@ -82,7 +81,19 @@ func TestKillMember(t *testing.T) {
 	// make sure the heartbeat monitoring would be trigger
 	mockTimer.AdvanceTime(HeartbeatTimeout * 2)
 
-	removedID := waitForChannelReceive(t, mockNotifier.MemberRemovedCh, 5*time.Second, "Expected member removed notification")
+	// make sure member 0 and member 2 would not trigger dead suspectinng
+	if m0, ok := q.members[0]; ok {
+		m0.mu.Lock()
+		m0.lastSeen[2] = mockTimer.Now()
+		m0.mu.Unlock()
+	}
+	if m2, ok := q.members[2]; ok {
+		m2.mu.Lock()
+		m2.lastSeen[0] = mockTimer.Now()
+		m2.mu.Unlock()
+	}
+
+	removedID := waitForChannelReceive(t, mockNotifier.memberRemovedCh, 5*time.Second, "Expected member removed notification")
 	if removedID != memberToKillID {
 		t.Errorf("Expected member %d to be removed, got %d", memberToKillID, removedID)
 	}
@@ -100,7 +111,7 @@ func TestKillMember(t *testing.T) {
 	}
 
 	if len(q.getAliveMemberIDs()) > 1 {
-		assertChannelEmpty(t, mockNotifier.QuorumEndedCh, 100*time.Millisecond, "Did not expect quorum ended notification")
+		assertChannelEmpty(t, mockNotifier.quorumEndedCh, 100*time.Millisecond, "Did not expect quorum ended notification")
 	}
 
 	q.Stop()
@@ -125,9 +136,9 @@ func TestMajorityVoteStrategy_HandleVote_NoMajority(t *testing.T) {
 	voteMsgFrom2 := Message{From: 2, To: 0, Type: Vote, Payload: 1}
 	q.members[0].handleMessage(voteMsgFrom2, q)
 
-	assertChannelEmpty(t, mockNotifier.MemberRemovedCh, 100*time.Millisecond, "Did not expect member removed notification (no majority)")
+	assertChannelEmpty(t, mockNotifier.memberRemovedCh, 100*time.Millisecond, "Did not expect member removed notification (no majority)")
 
-	assertChannelEmpty(t, mockNotifier.QuorumEndedCh, 100*time.Millisecond, "Did not expect quorum ended notification")
+	assertChannelEmpty(t, mockNotifier.quorumEndedCh, 100*time.Millisecond, "Did not expect quorum ended notification")
 
 	q.Stop()
 }
