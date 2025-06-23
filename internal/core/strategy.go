@@ -50,19 +50,7 @@ func (s *MajorityVoteStrategy) HandleRequestVote(from int, targetID int, self *M
 	if targetExists && !targetIsRemoved && (!ok || s.timer.Now().Sub(last) > HeartbeatTimeout) {
 		logrus.Infof("Member %d: Voting to confirm failure of member %d (requested by %d)", self.ID, targetID, from)
 		vote := Message{From: self.ID, To: from, Type: Vote, Payload: targetID}
-		q.mu.Lock()
-		targetMember := q.members[from]
-		q.mu.Unlock()
-		if targetMember != nil && targetMember.Alive && !q.removed[targetMember.ID] {
-			select {
-			case targetMember.Inbox <- vote:
-
-			case <-s.timer.NewTicker(100 * time.Millisecond).C:
-				logrus.Warnf("Member %d: Failed to send vote for %d to %d: inbox full or blocked.", self.ID, targetID, from)
-			}
-		} else {
-			logrus.Debugf("Member %d: Cannot send vote to %d (target not alive or removed).", self.ID, from)
-		}
+		networker.SendTo(vote, from)
 	} else {
 		logrus.Debugf("Member %d: Not voting for %d. Target exists: %t, Target removed: %t, Last seen ok: %t (since: %v)",
 			self.ID, targetID, targetExists, targetIsRemoved, ok && s.timer.Now().Sub(last) <= HeartbeatTimeout, s.timer.Now().Sub(last))
@@ -124,14 +112,41 @@ func (s *MajorityVoteStrategy) cleanupExpiredVotes() {
 		case <-ticker.C:
 			s.voteMutex.Lock()
 			now := s.timer.Now()
+			targetsToClean := []int{} // Temporarily store IDs of targets to clean
 			for targetID, ts := range s.voteTimestamps {
+				// Clean up if the timestamp is older than 2 * VoteDecisionTimeout
+				// (a generous period to ensure all voting members have had a chance to process).
 				if now.Sub(ts) > 2*VoteDecisionTimeout {
 					logrus.Infof("[GC] Vote record for target %d (initiated %v) expired and cleared (no majority reached).", targetID, ts)
-					delete(s.voteTimestamps, targetID)
-					delete(s.votes, targetID)
+					targetsToClean = append(targetsToClean, targetID)
 				}
 			}
 			s.voteMutex.Unlock()
+
+			for _, targetID := range targetsToClean {
+				s.voteMutex.Lock()
+				delete(s.voteTimestamps, targetID)
+				delete(s.votes, targetID)
+				s.voteMutex.Unlock()
+
+				s.quorum.mu.Lock()
+				_, targetStillExists := s.quorum.members[targetID]
+				currentActiveMembersCount := len(s.quorum.members)
+				s.quorum.mu.Unlock()
+
+				// If voting for a suspected member timed out (no majority),
+				// AND that member is still active (not removed by vote),
+				// AND the Quorum size is now too small to function (e.g., <= 1 active member left),
+				// then the Quorum should terminate as it's unrecoverable via majority vote.
+				if targetStillExists && currentActiveMembersCount <= 1 {
+					logrus.Warnf("Quorum unrecoverable: Suspected member %d's vote timed out, and quorum size (%d) makes it unrecoverable. Ending quorum.", targetID, currentActiveMembersCount)
+					s.quorum.quorumEndedOnce.Do(func() {
+						s.quorum.cancel()
+						s.quorum.notifier.NotifyQuorumEnded()
+					})
+				}
+			}
+
 		case <-s.ctx.Done():
 			logrus.Infof("MajorityVoteStrategy: cleanupExpiredVotes goroutine stopped.")
 			return

@@ -160,43 +160,43 @@ func (m *Member) monitorHeartbeats(q *Quorum) {
 					logrus.Debugf("Member %d: Added own implicit vote for suspect %d. Current votes: %v", m.ID, id, strategy.votes[id])
 					strategy.voteMutex.Unlock()
 
-					// *** EDGE CASE 2-MEMBER QUORUM LEADER FAILURE ***
+					// *** EDGE CASE: 2-MEMBER QUORUM FAILURE HANDLING (WALKAROUND SOLUTION FOR DEMO) ***
+					//
+					// Context: In a 2-member quorum, achieving a majority (2 votes) for member removal
+					// becomes impossible if one member fails or is partitioned. The standard voting process
+					// would lead to a prolonged period before cleanupExpiredVotes terminates the quorum.
+					//
+					// This walkaround provides a faster detection and termination for the demo.
+					// If a member is suspected and the quorum size is 2, it directly initiates a
+					// ProposeMemberRemoval after VoteDecisionTimeout.
+					//
+					// RISK ACKNOWLEDGEMENT:
+					// In a real-time network with network partitions, this local decision by the
+					// *single remaining active observer* (i.e., the node that *thinks* the other is unresponsive)
+					// can still lead to a form of split-brain in terms of independent decision-making.
+					// Both nodes, if partitioned, might independently conclude the other has failed and
+					// then terminate their respective quorums.
+					//
+					// This behavior is ACCEPTABLE for a 2-member fail-stop design (preferring halt over inconsistency)
+					// but it deviates from a strict multi-node consensus for removal.
+					//
+					// FUTURE PLAN: A more robust solution for production would typically involve:
+					// 1. A dedicated witness/arbiter service for 2-node clusters to break ties, or
+					// 2. A more sophisticated voting strategy that fully encapsulates timeout and
+					//    forced removal logic without local member-level shortcuts.
+					// All other member removals and quorum terminations are handled centrally
+					// by Quorum.ProposeMemberRemoval and MajorityVoteStrategy.cleanupExpiredVotes.
 					q.mu.Lock()
-					isTargetLeader := q.LeaderID == id
 					currentQuorumSize := len(q.members) // Get the current number of members in the quorum
+					removedMembers := q.removed
 					q.mu.Unlock()
 
-					// If the suspected member is the current leader AND the quorum size is 2,
-					// it means the leader has failed and the remaining single member cannot form a majority (2 votes needed).
-					// In this specific edge case, the quorum is unrecoverable via majority vote.
-					if isTargetLeader && currentQuorumSize == 2 {
+					if !removedMembers[id] && currentQuorumSize <= 2 && now.Sub(m.lastSeen[id]) > VoteDecisionTimeout {
+						// simple arrangement for timeout suspecting event
 						logrus.Warnf("Quorum unrecoverable: Leader %d failed and remaining 1-member cannot form majority. Ending quorum.", id)
-						q.cancel()
-						q.notifier.NotifyQuorumEnded()
+						q.ProposeMemberRemoval(id)
 
 						continue
-					}
-				}
-
-				// if the suspecting dispatcher is leader and the vote could not be trigger,  force kill member from quorum
-				if q.LeaderID == m.ID {
-					strategy, ok := m.Election.(*MajorityVoteStrategy)
-					if ok {
-						strategy.voteMutex.Lock()
-						ts, exists := strategy.voteTimestamps[id]
-						if exists && m.timer.Now().Sub(ts) > VoteDecisionTimeout {
-
-							logrus.Warnf("Leader %d: Vote decision for suspect %d timed out. Forcibly removing.", m.ID, id)
-							delete(strategy.votes, id)
-							delete(strategy.voteTimestamps, id)
-							q.ProposeMemberRemoval(id)
-						}
-
-						if !exists {
-							strategy.voteTimestamps[id] = m.timer.Now()
-							logrus.Debugf("Leader %d: Started vote decision timer for suspect %d at %v", m.ID, id, strategy.voteTimestamps[id])
-						}
-						strategy.voteMutex.Unlock()
 					}
 				}
 
