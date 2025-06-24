@@ -10,12 +10,11 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/Anthya1104/quorum-election-cli/internal/cobra"
 	"github.com/Anthya1104/quorum-election-cli/internal/core"
 	"github.com/sirupsen/logrus"
 )
 
-func RunQuorumSetup() {
+func RunQuorumSetup(members int) {
 	// goroutine for main function flow controlling
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
@@ -41,7 +40,7 @@ func RunQuorumSetup() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runQuorumCLI(ctx, cancel)
+		runQuorumCLI(ctx, cancel, members)
 	}()
 
 	logrus.Info("Main function waiting for all top-level goroutines to finish...")
@@ -74,13 +73,12 @@ func readInputLoop(ctx context.Context, inputChan chan<- string) {
 }
 
 // manage the CLI tool by context created in main.go
-func runQuorumCLI(ctx context.Context, cancel context.CancelFunc) {
+func runQuorumCLI(ctx context.Context, cancel context.CancelFunc, members int) {
 	// channel to read input
 	inputChan := make(chan string)
 	go readInputLoop(ctx, inputChan)
 
 	var quorum *core.Quorum
-	var members = cobra.GetMembers()
 
 	realTimer := core.NewRealTimer()
 

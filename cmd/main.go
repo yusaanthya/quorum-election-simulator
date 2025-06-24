@@ -6,7 +6,6 @@ import (
 	"github.com/Anthya1104/quorum-election-cli/internal/cobra"
 	"github.com/Anthya1104/quorum-election-cli/internal/config"
 	"github.com/Anthya1104/quorum-election-cli/internal/logger"
-	"github.com/Anthya1104/quorum-election-cli/internal/service"
 	"github.com/sirupsen/logrus"
 )
 
@@ -21,5 +20,4 @@ func main() {
 		os.Exit(1)
 	}
 
-	service.RunQuorumSetup()
 }
