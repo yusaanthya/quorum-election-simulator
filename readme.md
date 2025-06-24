@@ -48,7 +48,7 @@ Build the binary
 go build -o quorum_election cmd/main.go
 ```
 
-You can run the application directly using the go run command, specifying the initial number of members with the --members or -m flag. The default is 3 members.
+You can run the application directly using the go run command or the binary file name, specifying the initial number of members with the --members or -m flag. The default is 3 members.
 
 - To start with the default 3 members:
 
