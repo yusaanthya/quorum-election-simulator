@@ -20,7 +20,7 @@ var (
 		Use:   "version",
 		Short: "Print version info",
 		Run: func(cmd *cobra.Command, args []string) {
-			logrus.Infof("Version: %s\n", config.Version)
+			logrus.Infof("Version: %s", config.Version)
 		},
 	}
 )
