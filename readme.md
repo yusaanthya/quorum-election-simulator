@@ -37,24 +37,32 @@ This project simulates a Quorum cluster consisting of multiple members. Each mem
 
 ```
 git clone <Your project link, if any>
-cd quorum-election-cli
+cd quorum-election
 ```
 
 ### 2.3 Run the Application
 
-You can run the application directly using the go run command, specifying the initial number of members with the --members or -m flag. The default is 3 members.
+Build the binary
+
+```
+go build -o quorum_election cmd/main.go
+```
+
+You can run the application directly using the go run command or the binary file name, specifying the initial number of members with the --members or -m flag. The default is 3 members.
 
 - To start with the default 3 members:
 
 ```
-  go run .
+  ./quorum_election play
 ```
 
 - To start with 5 members:
 
 ```
-  go run . --members 5
+ ./quorum_election play --members 5
 ```
+
+> You can also build the binary refer to readme.md in the main root dir `./GTI-oa-cli`, the files would be collected inside `./GTI-oa-cli/bin` dir
 
 ### 2.4 CLI Commands
 
