@@ -87,6 +87,8 @@ Alternatively, you can run specific tests:
 go test ./internal/core -run TestKillMember
 ```
 
+Or you can just run `Run Core Tests` via the Run and Debug tool if you're with vscode.
+
 ## 3. Dependencies and Credits
 
 This project utilizes the following third-party Go modules:
