@@ -1,6 +1,6 @@
 package config
 
-var Version = "dev"
+var Version = "0.1.1"
 
 const (
 	LogLevelDebug   string = "debug"
