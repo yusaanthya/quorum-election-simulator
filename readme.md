@@ -37,7 +37,6 @@ This project simulates a Quorum cluster consisting of multiple members. Each mem
 
 ```
 git clone <Your project link, if any>
-cd quorum-election
 ```
 
 ### 2.3 Run the Application
@@ -62,7 +61,7 @@ You can run the application directly using the go run command or the binary file
  ./quorum_election play --members 5
 ```
 
-> You can also build the binary refer to readme.md in the main root dir `./GTI-oa-cli`, the files would be collected inside `./GTI-oa-cli/bin` dir
+> You can also build the binary by using `make all` or `make build-quorum-election-<OS>-<CPU_ARCH>`, which could refer to `Makefile` in the root dir
 
 ### 2.4 CLI Commands
 
