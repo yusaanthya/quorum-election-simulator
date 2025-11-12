@@ -158,7 +158,7 @@ As a demo project, there are design trade-offs and future potential improvements
   - **Improvement**: Replace the current simulated networker with an actual network communication module based on **TCP/UDP** or **gRPC**.
   - **Benefit**: Allows Quorum members to **run on different machines**, simulating a true distributed environment.
 
-## 6. Core Evolution: From Old to New Version (Key Changes in the Last Five Days)
+## 6. Core Evolution: From Old to New Version
 
 This project has undergone critical low-level architectural refactoring and concurrency model strengthening in the past five days, laying a solid foundation for future expansion.
 
