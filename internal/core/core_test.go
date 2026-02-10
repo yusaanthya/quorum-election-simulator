@@ -167,3 +167,73 @@ func TestFailoverReElection(t *testing.T) {
 		t.Errorf("New leader should be different from old leader")
 	}
 }
+
+func TestQuorumLossTermination(t *testing.T) {
+	mockTimer := NewMockTimer(time.Now())
+	mockNotifier := NewMockNotifier()
+	q := NewQuorum(3, mockTimer, mockNotifier)
+	q.networker = NewTestNetworkRouter(q)
+	q.Start()
+
+	// Wait for leader election
+	time.Sleep(50 * time.Millisecond)
+	leaderFound := false
+	for i := 0; i < 50; i++ {
+		mockTimer.AdvanceTime(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+
+		leaderCount := 0
+		for _, m := range q.members {
+			m.mu.Lock()
+			if m.State == Leader {
+				leaderCount++
+			}
+			m.mu.Unlock()
+		}
+		if leaderCount == 1 {
+			leaderFound = true
+			break
+		}
+	}
+
+	if !leaderFound {
+		t.Fatal("Failed to elect initial leader")
+	}
+
+	// Kill 2 nodes (majority loss)
+	q.members[0].Stop()
+	q.members[1].Stop()
+
+	t.Log("Killed members 0 and 1. Surviving member: 2")
+
+	// Advance time to allow accumulation of election failures
+	startState := q.members[2].Alive
+	if !startState {
+		t.Fatal("Member 2 should be alive initially")
+	}
+
+	stopped := false
+	for i := 0; i < 300; i++ { // 30s simulation
+		mockTimer.AdvanceTime(100 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
+
+		q.members[2].mu.Lock()
+		alive := q.members[2].Alive
+		failures := q.members[2].electionFailures
+		q.members[2].mu.Unlock()
+
+		if !alive {
+			t.Logf("Member 2 stopped as expected. Failures: %d", failures)
+			stopped = true
+			break
+		}
+	}
+
+	if !stopped {
+		q.members[2].mu.Lock()
+		failures := q.members[2].electionFailures
+		q.members[2].mu.Unlock()
+		t.Fatalf("Member 2 did not stop after quorum loss. Current failures: %d", failures)
+	}
+	q.Stop()
+}

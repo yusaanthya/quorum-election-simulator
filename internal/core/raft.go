@@ -6,6 +6,8 @@ const (
 	Follower RaftState = iota
 	Candidate
 	Leader
+	// MaxElectionFailures defines how many consecutive failed elections cause a node to stop
+	MaxElectionFailures = 5
 )
 
 func (s RaftState) String() string {

@@ -29,8 +29,9 @@ type Member struct {
 	LeaderID    int
 
 	// Volatile state
-	peers []int
-	votes map[int]bool // Set of members who granted vote in current term
+	electionFailures int
+	peers            []int
+	votes            map[int]bool // Set of members who granted vote in current term
 }
 
 func NewMember(ctx context.Context, id int, timer Timer, networker Networker, initialPeers []int, wg *sync.WaitGroup) *Member {
@@ -53,12 +54,13 @@ func NewMember(ctx context.Context, id int, timer Timer, networker Networker, in
 		networker: networker,
 		wg:        wg,
 
-		State:       Follower,
-		CurrentTerm: 0,
-		VotedFor:    -1,
-		LeaderID:    -1,
-		peers:       peers,
-		votes:       make(map[int]bool),
+		State:            Follower,
+		CurrentTerm:      0,
+		VotedFor:         -1,
+		LeaderID:         -1,
+		electionFailures: 0,
+		peers:            peers,
+		votes:            make(map[int]bool),
 	}
 
 	return m
@@ -127,6 +129,8 @@ func (m *Member) handleMessage(msg Message, electionTimer ITimer, heartbeatTicke
 	case MsgAppendEntries:
 		args := msg.Payload.(AppendEntriesArgs)
 		if args.Term >= m.CurrentTerm { // Recognized leader
+			// Reset election failures on valid heartbeat from current leader
+			m.electionFailures = 0
 			m.becomeFollower(args.Term, heartbeatTicker, electionTimer)
 			m.LeaderID = args.LeaderID
 
@@ -175,6 +179,13 @@ func (m *Member) startElection(electionTimer ITimer) {
 		return
 	}
 
+	m.electionFailures++
+	if m.electionFailures > MaxElectionFailures {
+		logrus.Errorf("Member %d: Exceeded max election failures (%d). Stopping.", m.ID, MaxElectionFailures)
+		m.Stop()
+		return
+	}
+
 	m.State = Candidate
 	m.CurrentTerm++
 	m.VotedFor = m.ID
@@ -182,7 +193,7 @@ func (m *Member) startElection(electionTimer ITimer) {
 	m.votes = make(map[int]bool)
 	m.votes[m.ID] = true // Vote for self
 
-	logrus.Infof("Member %d: Starting election for term %d", m.ID, m.CurrentTerm)
+	logrus.Infof("Member %d: Starting election for term %d (Failures: %d)", m.ID, m.CurrentTerm, m.electionFailures)
 
 	// Reset timer
 	electionTimer.Stop()
@@ -251,6 +262,7 @@ func (m *Member) becomeLeader(heartbeatTicker ITicker, electionTimer ITimer) {
 	m.State = Leader
 	m.LeaderID = m.ID
 	m.VotedFor = -1
+	m.electionFailures = 0 // Reset failures on becoming leader
 
 	electionTimer.Stop()
 	// We want to send heartbeat immediately, but ticker fires after duration.
