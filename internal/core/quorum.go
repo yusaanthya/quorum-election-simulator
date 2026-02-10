@@ -37,6 +37,37 @@ type Networker interface {
 	SendTo(msg Message, toMemberID int)
 }
 
+// DirectNetworker uses a map of channels for O(1) non-blocking sends.
+type DirectNetworker struct {
+	inboxes map[int]chan Message
+}
+
+func NewDirectNetworker(inboxes map[int]chan Message) *DirectNetworker {
+	return &DirectNetworker{inboxes: inboxes}
+}
+
+func (dn *DirectNetworker) Send(msg Message) {
+	// Broadcast to all
+	for id := range dn.inboxes {
+		if id != msg.From {
+			dn.SendTo(msg, id)
+		}
+	}
+}
+
+func (dn *DirectNetworker) SendTo(msg Message, toMemberID int) {
+	if ch, ok := dn.inboxes[toMemberID]; ok {
+		select {
+		case ch <- msg:
+			// Success
+		default:
+			logrus.Warnf("DirectNetworker: Dropped message from %d to %d (type %v) - Channel Full", msg.From, toMemberID, msg.Type)
+		}
+	} else {
+		logrus.Debugf("DirectNetworker: Target %d not found", toMemberID)
+	}
+}
+
 type QuorumNetworker struct {
 	q *Quorum
 }
@@ -100,15 +131,25 @@ func NewQuorum(n int, timer Timer, notifier QuorumEventNotifier) *Quorum {
 		quorumEndedOnce: sync.Once{},
 	}
 
-	q.networker = NewQuorumNetworker(q)
+	// Phase 1: Pre-allocate all channels (Inboxes)
+	inboxes := make(map[int]chan Message, n)
+	for i := 0; i < n; i++ {
+		inboxes[i] = make(chan Message, 100)
+	}
 
+	// Phase 2: Create Lock-Free Networker
+	// Use DirectNetworker instead of QuorumNetworker (dropping the central mutex!)
+	q.networker = NewDirectNetworker(inboxes)
+
+	// Phase 3: Create Members with injected dependencies
 	allMemberIDs := make([]int, 0, n)
 	for i := 0; i < n; i++ {
 		allMemberIDs = append(allMemberIDs, i)
 	}
 
 	for i := 0; i < n; i++ {
-		q.members[i] = NewMember(childCtx, i, timer, q.networker, allMemberIDs, &q.internalWg)
+		// Pass the pre-allocated inbox to the member
+		q.members[i] = NewMember(childCtx, i, timer, q.networker, allMemberIDs, inboxes[i], &q.internalWg)
 	}
 	return q
 }

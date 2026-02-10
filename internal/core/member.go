@@ -32,9 +32,10 @@ type Member struct {
 	electionFailures int
 	peers            []int
 	votes            map[int]bool // Set of members who granted vote in current term
+	contactedPeers   map[int]bool // Set of members contacted in current leader interval
 }
 
-func NewMember(ctx context.Context, id int, timer Timer, networker Networker, initialPeers []int, wg *sync.WaitGroup) *Member {
+func NewMember(ctx context.Context, id int, timer Timer, networker Networker, initialPeers []int, inbox chan Message, wg *sync.WaitGroup) *Member {
 	memberCtx, cancel := context.WithCancel(ctx)
 
 	peers := []int{}
@@ -47,7 +48,7 @@ func NewMember(ctx context.Context, id int, timer Timer, networker Networker, in
 	m := &Member{
 		ID:        id,
 		Alive:     true,
-		Inbox:     make(chan Message, 100),
+		Inbox:     inbox, // Use injected inbox
 		ctx:       memberCtx,
 		cancel:    cancel,
 		timer:     timer,
@@ -61,6 +62,7 @@ func NewMember(ctx context.Context, id int, timer Timer, networker Networker, in
 		electionFailures: 0,
 		peers:            peers,
 		votes:            make(map[int]bool),
+		contactedPeers:   make(map[int]bool),
 	}
 
 	return m
@@ -78,15 +80,20 @@ func (m *Member) Run(q *Quorum) {
 	heartbeatTicker := m.timer.NewTicker(500 * time.Millisecond) // 500ms heartbeat
 	heartbeatTicker.Stop()
 
+	// Quorum check ticker (for Leader Lease)
+	quorumCheckTicker := m.timer.NewTicker(2000 * time.Millisecond)
+	quorumCheckTicker.Stop()
+
 	for {
 		select {
 		case <-m.ctx.Done():
 			electionTimer.Stop()
 			heartbeatTicker.Stop()
+			quorumCheckTicker.Stop()
 			return
 
 		case msg := <-m.Inbox:
-			m.handleMessage(msg, electionTimer, heartbeatTicker)
+			m.handleMessage(msg, electionTimer, heartbeatTicker, quorumCheckTicker)
 
 		case <-electionTimer.C():
 			// Election timeout
@@ -95,11 +102,24 @@ func (m *Member) Run(q *Quorum) {
 		case <-heartbeatTicker.C():
 			// Send heartbeats if leader
 			m.sendHeartbeats()
+
+		case <-quorumCheckTicker.C():
+			if m.State == Leader {
+				if len(m.contactedPeers) < (len(m.peers)+1)/2+1 {
+					logrus.Warnf("Member %d: Lost quorum (contacted %d peers). Stepping down.", m.ID, len(m.contactedPeers))
+					m.becomeFollower(m.CurrentTerm, heartbeatTicker, electionTimer, quorumCheckTicker)
+				} else {
+					// Reset contacted peers for next interval
+					// Always count self
+					m.contactedPeers = make(map[int]bool)
+					m.contactedPeers[m.ID] = true
+				}
+			}
 		}
 	}
 }
 
-func (m *Member) handleMessage(msg Message, electionTimer ITimer, heartbeatTicker ITicker) {
+func (m *Member) handleMessage(msg Message, electionTimer ITimer, heartbeatTicker ITicker, quorumCheckTicker ITicker) {
 	if !m.Alive {
 		return
 	}
@@ -108,7 +128,7 @@ func (m *Member) handleMessage(msg Message, electionTimer ITimer, heartbeatTicke
 	case MsgRequestVote:
 		args := msg.Payload.(RequestVoteArgs)
 		if args.Term > m.CurrentTerm {
-			m.becomeFollower(args.Term, heartbeatTicker, electionTimer)
+			m.becomeFollower(args.Term, heartbeatTicker, electionTimer, quorumCheckTicker)
 		}
 		reply := m.handleRequestVote(args, electionTimer)
 		m.networker.SendTo(Message{
@@ -121,9 +141,9 @@ func (m *Member) handleMessage(msg Message, electionTimer ITimer, heartbeatTicke
 	case MsgRequestVoteReply:
 		reply := msg.Payload.(RequestVoteReply)
 		if reply.Term > m.CurrentTerm {
-			m.becomeFollower(reply.Term, heartbeatTicker, electionTimer)
+			m.becomeFollower(reply.Term, heartbeatTicker, electionTimer, quorumCheckTicker)
 		} else if reply.Term == m.CurrentTerm {
-			m.handleRequestVoteReply(reply, msg.From, heartbeatTicker, electionTimer)
+			m.handleRequestVoteReply(reply, msg.From, heartbeatTicker, electionTimer, quorumCheckTicker)
 		}
 
 	case MsgAppendEntries:
@@ -131,7 +151,7 @@ func (m *Member) handleMessage(msg Message, electionTimer ITimer, heartbeatTicke
 		if args.Term >= m.CurrentTerm { // Recognized leader
 			// Reset election failures on valid heartbeat from current leader
 			m.electionFailures = 0
-			m.becomeFollower(args.Term, heartbeatTicker, electionTimer)
+			m.becomeFollower(args.Term, heartbeatTicker, electionTimer, quorumCheckTicker)
 			m.LeaderID = args.LeaderID
 
 			// Reset election timer
@@ -146,6 +166,15 @@ func (m *Member) handleMessage(msg Message, electionTimer ITimer, heartbeatTicke
 			Type:    MsgAppendEntriesReply,
 			Payload: reply,
 		}, msg.From)
+
+	case MsgAppendEntriesReply:
+		reply := msg.Payload.(AppendEntriesReply)
+		if reply.Term > m.CurrentTerm {
+			m.becomeFollower(reply.Term, heartbeatTicker, electionTimer, quorumCheckTicker)
+		} else if m.State == Leader && reply.Term == m.CurrentTerm {
+			// Record contact
+			m.contactedPeers[msg.From] = true
+		}
 	}
 }
 
@@ -153,20 +182,32 @@ func duration(ms int) time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-func (m *Member) becomeFollower(term int, heartbeatTicker ITicker, electionTimer ITimer) {
+func (m *Member) becomeFollower(term int, heartbeatTicker ITicker, electionTimer ITimer, quorumCheckTicker ITicker) {
 	if m.State != Follower || m.CurrentTerm != term {
 		logrus.Infof("Member %d: Becoming Follower for term %d", m.ID, term)
 	}
+
+	// Only reset VotedFor/votes if we are moving to a NEW term.
+	// If we are just stepping down in the same term (e.g., Candidate -> Follower),
+	// we must preserve our vote (which was for ourself or someone else).
+	if term > m.CurrentTerm {
+		m.VotedFor = -1
+		m.votes = make(map[int]bool)
+		m.CurrentTerm = term
+	}
+
 	m.State = Follower
-	m.CurrentTerm = term
-	m.VotedFor = -1
 	m.LeaderID = -1
-	m.votes = make(map[int]bool)
 
 	// Ensure heartbeat ticker is stopped
 	if heartbeatTicker != nil {
 		heartbeatTicker.Stop()
 	}
+	// Stop quorum check ticker
+	if quorumCheckTicker != nil {
+		quorumCheckTicker.Stop()
+	}
+
 	// Reset election timer
 	if electionTimer != nil {
 		electionTimer.Stop()
@@ -240,7 +281,7 @@ func (m *Member) handleRequestVote(args RequestVoteArgs, electionTimer ITimer) R
 	return reply
 }
 
-func (m *Member) handleRequestVoteReply(reply RequestVoteReply, fromID int, heartbeatTicker ITicker, electionTimer ITimer) {
+func (m *Member) handleRequestVoteReply(reply RequestVoteReply, fromID int, heartbeatTicker ITicker, electionTimer ITimer, quorumCheckTicker ITicker) {
 	if m.State != Candidate {
 		return
 	}
@@ -253,21 +294,32 @@ func (m *Member) handleRequestVoteReply(reply RequestVoteReply, fromID int, hear
 
 		if votesReceived >= majority {
 			logrus.Infof("Member %d: Won election for term %d with %d votes", m.ID, m.CurrentTerm, votesReceived)
-			m.becomeLeader(heartbeatTicker, electionTimer)
+			m.becomeLeader(heartbeatTicker, electionTimer, quorumCheckTicker)
 		}
 	}
 }
 
-func (m *Member) becomeLeader(heartbeatTicker ITicker, electionTimer ITimer) {
+func (m *Member) becomeLeader(heartbeatTicker ITicker, electionTimer ITimer, quorumCheckTicker ITicker) {
 	m.State = Leader
 	m.LeaderID = m.ID
 	m.VotedFor = -1
 	m.electionFailures = 0 // Reset failures on becoming leader
 
+	// Initialize contacted peers
+	m.contactedPeers = make(map[int]bool)
+	m.contactedPeers[m.ID] = true
+
 	electionTimer.Stop()
 	// We want to send heartbeat immediately, but ticker fires after duration.
 	// So we manually send once, then start ticker.
 	m.sendHeartbeats()
+
+	// Start quorum check
+	if ticker, ok := quorumCheckTicker.(interface{ Reset(d time.Duration) }); ok {
+		ticker.Reset(2000 * time.Millisecond)
+	} else {
+		// Just start it if implemented differently, but here we assume Reset capability
+	}
 
 	// Reset ticker to fire regularly
 	// Note: ITicker doesn't have Reset in stdlib Ticker, but we can Stop and NewTicker?
