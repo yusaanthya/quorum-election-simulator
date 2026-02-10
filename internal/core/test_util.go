@@ -11,23 +11,77 @@ import (
 // ========================
 // mock timer for testing
 // ========================
-type MockTicker struct {
-	C chan time.Time
+
+type MockTimerEntry struct {
+	ch       chan time.Time
+	deadline time.Time
+	isTicker bool
+	interval time.Duration
+	running  bool
 }
 
-// do mothing because the MockTicker is not triggered by a real goroutine
-func (mt *MockTicker) Stop() {}
+// MockTickerWrapper implements ITicker interface
+type MockTickerWrapper struct {
+	entry *MockTimerEntry
+	mt    *MockTimer
+}
+
+func (m *MockTickerWrapper) C() <-chan time.Time {
+	return m.entry.ch
+}
+
+func (m *MockTickerWrapper) Stop() {
+	m.mt.mu.Lock()
+	defer m.mt.mu.Unlock()
+	m.entry.running = false
+}
+
+// Reset is not part of ITicker usually, but we added it for heartbeat
+func (m *MockTickerWrapper) Reset(d time.Duration) {
+	m.mt.mu.Lock()
+	defer m.mt.mu.Unlock()
+	m.entry.interval = d
+	m.entry.deadline = m.mt.currentTime.Add(d)
+	m.entry.running = true
+}
+
+// MockTimerWrapper implements ITimer interface
+type MockTimerWrapper struct {
+	entry *MockTimerEntry
+	mt    *MockTimer
+}
+
+func (m *MockTimerWrapper) C() <-chan time.Time {
+	return m.entry.ch
+}
+
+func (m *MockTimerWrapper) Stop() bool {
+	m.mt.mu.Lock()
+	defer m.mt.mu.Unlock()
+	active := m.entry.running
+	m.entry.running = false
+	return active
+}
+
+func (m *MockTimerWrapper) Reset(d time.Duration) bool {
+	m.mt.mu.Lock()
+	defer m.mt.mu.Unlock()
+	active := m.entry.running
+	m.entry.deadline = m.mt.currentTime.Add(d)
+	m.entry.running = true
+	return active
+}
 
 type MockTimer struct {
-	currentTime    time.Time
-	mu             sync.Mutex
-	tickerChannels []chan time.Time
+	currentTime time.Time
+	mu          sync.Mutex
+	entries     []*MockTimerEntry
 }
 
 func NewMockTimer(initialTime time.Time) *MockTimer {
 	return &MockTimer{
-		currentTime:    initialTime,
-		tickerChannels: make([]chan time.Time, 0),
+		currentTime: initialTime,
+		entries:     make([]*MockTimerEntry, 0),
 	}
 }
 
@@ -37,28 +91,80 @@ func (m *MockTimer) Now() time.Time {
 	return m.currentTime
 }
 
-func (m *MockTimer) NewTicker(d time.Duration) *time.Ticker {
+func (m *MockTimer) NewTicker(d time.Duration) ITicker {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	ch := make(chan time.Time, 1)
-	m.tickerChannels = append(m.tickerChannels, ch)
-	return &time.Ticker{C: ch}
+	entry := &MockTimerEntry{
+		ch:       make(chan time.Time, 1),
+		deadline: m.currentTime.Add(d),
+		isTicker: true,
+		interval: d,
+		running:  true,
+	}
+	m.entries = append(m.entries, entry)
+	return &MockTickerWrapper{entry: entry, mt: m}
+}
+
+func (m *MockTimer) NewTimer(d time.Duration) ITimer {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry := &MockTimerEntry{
+		ch:       make(chan time.Time, 1),
+		deadline: m.currentTime.Add(d),
+		isTicker: false,
+		running:  true,
+	}
+	m.entries = append(m.entries, entry)
+	return &MockTimerWrapper{entry: entry, mt: m}
 }
 
 func (m *MockTimer) AdvanceTime(d time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.currentTime = m.currentTime.Add(d)
-	logrus.Debugf("MockTime advanced to: %v", m.currentTime)
 
-	for _, ch := range m.tickerChannels {
-		select {
-		case ch <- m.currentTime:
-		default:
-			logrus.Debugf("MockTicker channel full, couldn't send time: %v", m.currentTime)
+	finalTime := m.currentTime.Add(d)
+
+	// We need to simulate time passing event by event if we want strict ordering,
+	// but for now let's just trigger everything that is due by finalTime.
+	// Actually, simpler: check all entries. If deadline <= finalTime, trigger.
+	// Note: Tickers might need multiple triggers if d is large.
+	// For simplicity, we trigger only once per AdvanceTime call or we loop?
+
+	// Let's just update currentTime and check deadlines.
+	m.currentTime = finalTime
+	// logrus.Debugf("MockTime advanced to: %v", m.currentTime)
+
+	for _, entry := range m.entries {
+		if !entry.running {
+			continue
+		}
+
+		if !entry.deadline.After(m.currentTime) {
+			// Trigger
+			select {
+			case entry.ch <- m.currentTime:
+			default:
+				// channel full, skip
+			}
+
+			if entry.isTicker {
+				// Reschedule ticker
+				// In a real system, it adds interval to LAST firing time.
+				// But here let's just add interval to deadline.
+				for !entry.deadline.After(m.currentTime) {
+					entry.deadline = entry.deadline.Add(entry.interval)
+				}
+			} else {
+				// Timer fires once
+				entry.running = false
+			}
 		}
 	}
+
+	// Sort by deadline? No need if we just scan all.
 }
+
+// ... (TestNetworkRouter and MockNotifier remain same)
 
 // ========================
 // mock inbox TestNetworkRouter for testing

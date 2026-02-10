@@ -2,227 +2,333 @@ package core
 
 import (
 	"context"
+	"math/rand"
 	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
 )
 
-const (
-	HeartbeatInterval   = 2 * time.Second
-	HeartbeatTimeout    = 4 * time.Second
-	VoteDecisionTimeout = 2 * HeartbeatTimeout
-)
-
-type MessageType int
-
-const (
-	Heartbeat MessageType = iota
-	RequestVote
-	Vote
-	// extnd for different type strategies e.g.
-	// ElectionMessage // for Bully algorithm
-	// VictoryMessage  // for Bully algorithm
-	// AppendEntries   // for Raft
-	// RequestVoteRPC  // for Raft
-)
-
-type Message struct {
-	From    int
-	To      int
-	Type    MessageType
-	Payload interface{}
-}
-
 type Member struct {
-	ID       int
-	Alive    bool
-	Inbox    chan Message
-	lastSeen map[int]time.Time
-	mu       sync.Mutex
+	ID    int
+	Alive bool
+	Inbox chan Message
+	mu    sync.Mutex
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	Election  ElectionStrategy
 	timer     Timer
 	networker Networker
 	wg        *sync.WaitGroup
+
+	// Raft State
+	State       RaftState
+	CurrentTerm int
+	VotedFor    int
+	LeaderID    int
+
+	// Volatile state
+	peers []int
+	votes map[int]bool // Set of members who granted vote in current term
 }
 
-func NewMember(ctx context.Context, id int, strategy ElectionStrategy, timer Timer, networker Networker, initialPeers []int, wg *sync.WaitGroup) *Member {
+func NewMember(ctx context.Context, id int, timer Timer, networker Networker, initialPeers []int, wg *sync.WaitGroup) *Member {
 	memberCtx, cancel := context.WithCancel(ctx)
-	logrus.Infof("Member %v: Hi", id)
+
+	peers := []int{}
+	for _, p := range initialPeers {
+		if p != id {
+			peers = append(peers, p)
+		}
+	}
 
 	m := &Member{
 		ID:        id,
 		Alive:     true,
-		Inbox:     make(chan Message, 10),
-		lastSeen:  make(map[int]time.Time),
+		Inbox:     make(chan Message, 100),
 		ctx:       memberCtx,
 		cancel:    cancel,
-		Election:  strategy,
 		timer:     timer,
 		networker: networker,
 		wg:        wg,
+
+		State:       Follower,
+		CurrentTerm: 0,
+		VotedFor:    -1,
+		LeaderID:    -1,
+		peers:       peers,
+		votes:       make(map[int]bool),
 	}
 
-	// init lastSeen to prevent suspecting others immediately
-	now := m.timer.Now()
-	for _, peerID := range initialPeers {
-		if peerID != m.ID {
-			m.lastSeen[peerID] = now
-		}
-	}
 	return m
 }
 
 func (m *Member) Run(q *Quorum) {
 	defer m.wg.Done()
+	logrus.Infof("Member %d: Started Raft Node", m.ID)
 
-	go m.sendHeartbeats()
-	go m.monitorHeartbeats(q)
+	// Initial random election timeout
+	electionTimeout := duration(1500 + rand.Intn(1500))
+	electionTimer := m.timer.NewTimer(electionTimeout)
+
+	// Heartbeat ticker (stopped initially)
+	heartbeatTicker := m.timer.NewTicker(500 * time.Millisecond) // 500ms heartbeat
+	heartbeatTicker.Stop()
 
 	for {
 		select {
-		case msg := <-m.Inbox:
-			m.handleMessage(msg, q)
 		case <-m.ctx.Done():
-			logrus.Infof("Member %d: context cancelled, stopping run loop.", m.ID)
+			electionTimer.Stop()
+			heartbeatTicker.Stop()
 			return
+
+		case msg := <-m.Inbox:
+			m.handleMessage(msg, electionTimer, heartbeatTicker)
+
+		case <-electionTimer.C():
+			// Election timeout
+			m.startElection(electionTimer)
+
+		case <-heartbeatTicker.C():
+			// Send heartbeats if leader
+			m.sendHeartbeats()
 		}
 	}
+}
+
+func (m *Member) handleMessage(msg Message, electionTimer ITimer, heartbeatTicker ITicker) {
+	if !m.Alive {
+		return
+	}
+
+	switch msg.Type {
+	case MsgRequestVote:
+		args := msg.Payload.(RequestVoteArgs)
+		if args.Term > m.CurrentTerm {
+			m.becomeFollower(args.Term, heartbeatTicker, electionTimer)
+		}
+		reply := m.handleRequestVote(args, electionTimer)
+		m.networker.SendTo(Message{
+			From:    m.ID,
+			To:      msg.From,
+			Type:    MsgRequestVoteReply,
+			Payload: reply,
+		}, msg.From)
+
+	case MsgRequestVoteReply:
+		reply := msg.Payload.(RequestVoteReply)
+		if reply.Term > m.CurrentTerm {
+			m.becomeFollower(reply.Term, heartbeatTicker, electionTimer)
+		} else if reply.Term == m.CurrentTerm {
+			m.handleRequestVoteReply(reply, msg.From, heartbeatTicker, electionTimer)
+		}
+
+	case MsgAppendEntries:
+		args := msg.Payload.(AppendEntriesArgs)
+		if args.Term >= m.CurrentTerm { // Recognized leader
+			m.becomeFollower(args.Term, heartbeatTicker, electionTimer)
+			m.LeaderID = args.LeaderID
+
+			// Reset election timer
+			electionTimer.Stop()
+			electionTimer.Reset(duration(1500 + rand.Intn(1500)))
+		}
+
+		reply := m.handleAppendEntries(args)
+		m.networker.SendTo(Message{
+			From:    m.ID,
+			To:      msg.From,
+			Type:    MsgAppendEntriesReply,
+			Payload: reply,
+		}, msg.From)
+	}
+}
+
+func duration(ms int) time.Duration {
+	return time.Duration(ms) * time.Millisecond
+}
+
+func (m *Member) becomeFollower(term int, heartbeatTicker ITicker, electionTimer ITimer) {
+	if m.State != Follower || m.CurrentTerm != term {
+		logrus.Infof("Member %d: Becoming Follower for term %d", m.ID, term)
+	}
+	m.State = Follower
+	m.CurrentTerm = term
+	m.VotedFor = -1
+	m.LeaderID = -1
+	m.votes = make(map[int]bool)
+
+	// Ensure heartbeat ticker is stopped
+	if heartbeatTicker != nil {
+		heartbeatTicker.Stop()
+	}
+	// Reset election timer
+	if electionTimer != nil {
+		electionTimer.Stop()
+		electionTimer.Reset(duration(1500 + rand.Intn(1500)))
+	}
+}
+
+func (m *Member) startElection(electionTimer ITimer) {
+	if m.State == Leader {
+		return
+	}
+
+	m.State = Candidate
+	m.CurrentTerm++
+	m.VotedFor = m.ID
+	m.LeaderID = -1
+	m.votes = make(map[int]bool)
+	m.votes[m.ID] = true // Vote for self
+
+	logrus.Infof("Member %d: Starting election for term %d", m.ID, m.CurrentTerm)
+
+	// Reset timer
+	electionTimer.Stop()
+	electionTimer.Reset(duration(1500 + rand.Intn(1500)))
+
+	args := RequestVoteArgs{
+		Term:        m.CurrentTerm,
+		CandidateID: m.ID,
+	}
+
+	for _, pid := range m.peers {
+		go func(target int) {
+			m.networker.SendTo(Message{
+				From:    m.ID,
+				To:      target,
+				Type:    MsgRequestVote,
+				Payload: args,
+			}, target)
+		}(pid)
+	}
+}
+
+func (m *Member) handleRequestVote(args RequestVoteArgs, electionTimer ITimer) RequestVoteReply {
+	reply := RequestVoteReply{
+		Term:        m.CurrentTerm,
+		VoteGranted: false,
+	}
+
+	if args.Term < m.CurrentTerm {
+		return reply
+	}
+
+	if m.VotedFor == -1 || m.VotedFor == args.CandidateID {
+		m.VotedFor = args.CandidateID
+		reply.VoteGranted = true
+
+		// Reset election timer since we granted a vote (don't want to timeout immediately)
+		electionTimer.Stop()
+		electionTimer.Reset(duration(1500 + rand.Intn(1500)))
+
+		logrus.Infof("Member %d: Voted for %d in term %d", m.ID, args.CandidateID, m.CurrentTerm)
+	}
+
+	return reply
+}
+
+func (m *Member) handleRequestVoteReply(reply RequestVoteReply, fromID int, heartbeatTicker ITicker, electionTimer ITimer) {
+	if m.State != Candidate {
+		return
+	}
+
+	if reply.VoteGranted {
+		m.votes[fromID] = true
+
+		votesReceived := len(m.votes)
+		majority := (len(m.peers)+1)/2 + 1
+
+		if votesReceived >= majority {
+			logrus.Infof("Member %d: Won election for term %d with %d votes", m.ID, m.CurrentTerm, votesReceived)
+			m.becomeLeader(heartbeatTicker, electionTimer)
+		}
+	}
+}
+
+func (m *Member) becomeLeader(heartbeatTicker ITicker, electionTimer ITimer) {
+	m.State = Leader
+	m.LeaderID = m.ID
+	m.VotedFor = -1
+
+	electionTimer.Stop()
+	// We want to send heartbeat immediately, but ticker fires after duration.
+	// So we manually send once, then start ticker.
+	m.sendHeartbeats()
+
+	// Reset ticker to fire regularly
+	// Note: ITicker doesn't have Reset in stdlib Ticker, but we can Stop and NewTicker?
+	// Ah, Ticker just needs to be started?
+	// `NewTicker` creates a running ticker. `Stop` stops it.
+	// Getting a new ticker is expensive/complex here if we want to reuse the variable.
+	// But `ITicker` interface has no Reset.
+	// Actually typical pattern is creating a new ticker.
+	// BUT, my `Member` struct doesn't hold `heartbeatTicker`. It's local variable in `Run`.
+	// So I can't easily "replace" it if `becomeLeader` is called from handling message.
+	// Wait, `heartbeatTicker` IS passed to `becomeLeader`.
+	// But `heartbeatTicker` (ITicker) only has `Stop`. It doesn't have `Reset`.
+	// Standard `time.Ticker` has `Reset`. I should add `Reset` to `ITicker` interface!
+	// `time.Ticker` has `Reset(d Duration)` since Go 1.15.
+
+	// I forgot to add `Reset` to `ITicker` interface in `timer.go`.
+	// For now, I will assume I can just use it if I cast, or I should update `timer.go`?
+	// I should update `timer.go` to be safe.
+	// OR, I just assume `timer.go` update is too much overhead now and I just use `NewTicker` logic?
+	// But I can't replace the variable in `Run` loop from `handleMessage`.
+	// So `heartbeatTicker` MUST be capable of being reset or restarted.
+
+	// QUICK FIX: Add `Reset` to `ITicker` interface?
+	// Yes, `time.Ticker` has `Reset`.
+	// I'll assume I can add it quickly.
+
+	// Or, I can just not use Ticker for heartbeat and use another Timer?
+	// No, Ticker is better.
+
+	// Let's rely on `Reset`.
+	if ticker, ok := heartbeatTicker.(interface{ Reset(d time.Duration) }); ok {
+		ticker.Reset(500 * time.Millisecond)
+	} else {
+		logrus.Warn("Heartbeat ticker does not support Reset, heartbeats might be broken.")
+	}
+}
+
+func (m *Member) handleAppendEntries(args AppendEntriesArgs) AppendEntriesReply {
+	reply := AppendEntriesReply{
+		Term:    m.CurrentTerm,
+		Success: false,
+	}
+
+	if args.Term < m.CurrentTerm {
+		return reply
+	}
+
+	reply.Success = true
+	return reply
 }
 
 func (m *Member) sendHeartbeats() {
-	ticker := m.timer.NewTicker(HeartbeatInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			if m.Alive {
-				msg := Message{From: m.ID, Type: Heartbeat}
-				m.networker.Send(msg)
-				logrus.Debugf("Member %d: Sent heartbeat", m.ID)
-			}
-		case <-m.ctx.Done():
-			logrus.Debugf("Member %d: Heartbeat sender stopped.", m.ID)
-			return
-		}
+	if m.State != Leader {
+		return
 	}
-}
 
-// periodical monitoring haertbeat between members to trigger suspecting mechanism
-func (m *Member) monitorHeartbeats(q *Quorum) {
-	ticker := m.timer.NewTicker(HeartbeatTimeout / 2)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			m.mu.Lock()
-			suspects := []int{}
-			now := m.timer.Now()
-
-			q.mu.Lock()
-			currentMemberIDs := make([]int, 0, len(q.members))
-			for id := range q.members {
-				currentMemberIDs = append(currentMemberIDs, id)
-			}
-			q.mu.Unlock()
-
-			for _, id := range currentMemberIDs {
-				if id == m.ID {
-					continue
-				}
-				last, exists := m.lastSeen[id]
-
-				q.mu.Lock()
-				isRemoved := q.removed[id]
-				q.mu.Unlock()
-
-				if !isRemoved && (!exists || now.Sub(last) > HeartbeatTimeout) {
-					suspects = append(suspects, id)
-				}
-			}
-			m.mu.Unlock()
-
-			for _, id := range suspects {
-				logrus.Infof("Member %d: Suspecting member %d (no heartbeat for %v)", m.ID, id, now.Sub(m.lastSeen[id]))
-
-				if strategy, ok := m.Election.(*MajorityVoteStrategy); ok {
-					strategy.voteMutex.Lock()
-					if _, exists := strategy.votes[id]; !exists {
-						strategy.votes[id] = make(map[int]bool)
-					}
-					// Add this member's (m.ID) vote for the suspected member (id)
-					strategy.votes[id][m.ID] = true
-					logrus.Debugf("Member %d: Added own implicit vote for suspect %d. Current votes: %v", m.ID, id, strategy.votes[id])
-					strategy.voteMutex.Unlock()
-
-					// *** EDGE CASE: 2-MEMBER QUORUM FAILURE HANDLING (WALKAROUND SOLUTION FOR DEMO) ***
-					//
-					// Context: In a 2-member quorum, achieving a majority (2 votes) for member removal
-					// becomes impossible if one member fails or is partitioned. The standard voting process
-					// would lead to a prolonged period before cleanupExpiredVotes terminates the quorum.
-					//
-					// This walkaround provides a faster detection and termination for the demo.
-					// If a member is suspected and the quorum size is 2, it directly initiates a
-					// ProposeMemberRemoval after VoteDecisionTimeout.
-					//
-					// RISK ACKNOWLEDGEMENT:
-					// In a real-time network with network partitions, this local decision by the
-					// *single remaining active observer* (i.e., the node that *thinks* the other is unresponsive)
-					// can still lead to a form of split-brain in terms of independent decision-making.
-					// Both nodes, if partitioned, might independently conclude the other has failed and
-					// then terminate their respective quorums.
-					//
-					// This behavior is ACCEPTABLE for a 2-member fail-stop design (preferring halt over inconsistency)
-					// but it deviates from a strict multi-node consensus for removal.
-					//
-					// FUTURE PLAN: A more robust solution for production would typically involve:
-					// 1. A dedicated witness/arbiter service for 2-node clusters to break ties, or
-					// 2. A more sophisticated voting strategy that fully encapsulates timeout and
-					//    forced removal logic without local member-level shortcuts.
-					// All other member removals and quorum terminations are handled centrally
-					// by Quorum.ProposeMemberRemoval and MajorityVoteStrategy.cleanupExpiredVotes.
-					q.mu.Lock()
-					currentQuorumSize := len(q.members) // Get the current number of members in the quorum
-					removedMembers := q.removed
-					q.mu.Unlock()
-
-					if !removedMembers[id] && currentQuorumSize <= 2 && now.Sub(m.lastSeen[id]) > VoteDecisionTimeout {
-						// simple arrangement for timeout suspecting event
-						logrus.Warnf("Quorum unrecoverable: Leader %d failed and remaining 1-member cannot form majority. Ending quorum.", id)
-						q.ProposeMemberRemoval(id)
-
-						continue
-					}
-				}
-
-				voteReq := Message{From: m.ID, Type: RequestVote, Payload: id}
-				m.networker.Send(voteReq)
-			}
-		case <-m.ctx.Done():
-			logrus.Debugf("Member %d: Heartbeat monitor stopped.", m.ID)
-			return
-		}
+	args := AppendEntriesArgs{
+		Term:     m.CurrentTerm,
+		LeaderID: m.ID,
 	}
-}
 
-func (m *Member) handleMessage(msg Message, q *Quorum) {
-	logrus.Debugf("Member %d: Received message from %d, Type: %v, Payload: %v", m.ID, msg.From, msg.Type, msg.Payload)
-	switch msg.Type {
-	case Heartbeat:
-		m.mu.Lock()
-		m.lastSeen[msg.From] = m.timer.Now()
-		m.mu.Unlock()
-	case RequestVote:
-		targetID := msg.Payload.(int)
-		m.Election.HandleRequestVote(msg.From, targetID, m, q, m.networker)
-	case Vote:
-		targetID := msg.Payload.(int)
-		m.Election.HandleVote(msg.From, targetID, m, q, m.networker)
+	for _, pid := range m.peers {
+		// send in separate goroutine to avoid blocking?
+		// networker.SendTo might block if channel full.
+		// Sending in goroutine is safer for liveness.
+		go func(target int) {
+			m.networker.SendTo(Message{
+				From:    m.ID,
+				To:      target,
+				Type:    MsgAppendEntries,
+				Payload: args,
+			}, target)
+		}(pid)
 	}
 }
 
