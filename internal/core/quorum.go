@@ -123,6 +123,16 @@ func (q *Quorum) Start() {
 		q.internalWg.Add(1)
 		go m.Run(q)
 	}
+
+	// Monitor for all members stopping
+	go func() {
+		q.internalWg.Wait()
+		q.quorumEndedOnce.Do(func() {
+			logrus.Info("All members stopped. Auto-terminating Quorum.")
+			q.notifier.NotifyQuorumEnded()
+			q.cancel()
+		})
+	}()
 }
 
 // KillMember to stop member's heartbeat/processing
