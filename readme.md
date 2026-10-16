@@ -1,6 +1,6 @@
 # Quorum Election CLI Project
 
-This is a CLI (Command Line Interface) application implemented in Go, designed to simulate a Quorum (Deductive Majority) mechanism in a distributed system. It includes inter-member heartbeat monitoring, fault detection, majority-vote-based member removal, and Leader election. This project aims to demonstrate Liveness and Consistency in a distributed system when facing node failures.
+This is a CLI (Command Line Interface) application implemented in Go that simulates leader election in a distributed cluster using the leader-election part of the Raft consensus algorithm. Members elect a leader by majority vote, the leader keeps its followers with heartbeats, and a new leader is elected when the current one fails. This project aims to demonstrate Liveness and Safety in a distributed system when facing node failures.
 
 ## Table of Contents
 
@@ -13,25 +13,23 @@ This is a CLI (Command Line Interface) application implemented in Go, designed t
    - Run Tests
 3. Dependencies and Credits
 4. System Design and Architectural Considerations
-   - Modularity and Interface Abstraction
-   - Decentralized Heartbeat Monitoring
-   - Majority Vote Mechanism (MajorityVoteStrategy)
-   - Graceful Shutdown (context.Context and sync.WaitGroup)
-   - Simplified Leader Election
+   - Domain Layer and Runtime Layer
+   - Raft Leader Election
+   - Leader Lease (Quorum Check)
+   - Termination on Repeated Election Failure
+   - Graceful Shutdown and Concurrency
 5. Known Issues and Future Optimization Directions
-   - Considerations for Current Demo Version
-   - Future Optimization Directions
-6. Core Evolution: From Old to New Version (Key Changes in the Last Five Days)
+6. Core Evolution
 
 ## 1. Project Introduction
 
-This project simulates a Quorum cluster consisting of multiple members. Each member operates independently, monitoring the health status of others through heartbeats. When a node is suspected to have failed, the system triggers a majority vote to confirm its status and decide whether to remove it from the Quorum. A Leader is elected from the active members and automatically re-elected if the current Leader fails. The project emphasizes demonstrating **Liveness** and **Consistency** in a distributed system when confronted with node failures.
+This project simulates a cluster of multiple members. Every member runs independently and starts as a Follower. When a follower stops hearing from a leader, it becomes a Candidate and asks the others for votes; a candidate that collects a majority (`N/2 + 1`) becomes the Leader and sends periodic heartbeats. If the leader is killed, the remaining members time out and elect a new one, as long as a majority is still alive. If no majority is left, members keep failing elections and eventually stop, which ends the simulation.
 
 ## 2. How to Use
 
 ### 2.1 Prerequisites
 
-- Go Language Environment (Version 1.18 or higher)
+- Go Language Environment (Version 1.24 or higher, as required by `go.mod`)
 
 ### 2.2 Clone the Project
 
@@ -67,7 +65,7 @@ You can run the application directly using the go run command or the binary file
 
 Once the application starts, you can interact with the Quorum by entering the following commands in the command line:
 
-- `kill <member_id`>: Simulates killing the member with the specified ID. This member will stop sending heartbeats and will be detected as failed by other members.
+- `kill <member_id>`: Simulates a crash of the member with the specified ID. The member stops processing messages and timers. If it was the leader, the remaining members stop receiving heartbeats, time out, and elect a new leader.
 - Example: `kill 1` (kills member with ID 1)
 - `restart`: Stops the currently running Quorum and starts a new one (with the same number of members as before).
 - `exit`: Gracefully shuts down the Quorum application.
@@ -80,10 +78,16 @@ To run all tests in the project, execute the following command from the project 
 go test ./...
 ```
 
+The Raft rules are unit-tested without goroutines or sleeps in `internal/core/raft`. To check for data races as well:
+
+```
+go test -race ./...
+```
+
 Alternatively, you can run specific tests:
 
 ```
-go test ./internal/core -run TestKillMember
+go test ./internal/core -run TestFailoverReElection
 ```
 
 Or you can just run `Run Core Tests` via the Run and Debug tool if you're with vscode.
@@ -98,82 +102,62 @@ This project utilizes the following third-party Go modules:
 
 ## 4. System Design and Architectural Considerations
 
-The design of this project adheres to several core principles to ensure code modularity, maintainability, and scalability.
+### 4.1 Domain Layer and Runtime Layer
 
-### 4.1 Modularity and Interface Abstraction
+The core is split into two layers. The outer layer may depend on the inner one, never the reverse; being separate Go packages lets the compiler enforce this.
 
-- **Change**: Core functionalities such as time management (`Timer`), network communication (`Networker`), election strategy (`ElectionStrategy`), and event notification (`QuorumEventNotifier`) are defined as interfaces.
-- **Benefit**: This design achieves high **decoupling** by allowing different implementations for these interfaces (e.g., `RealTimer` vs. `MockTimer` for testing). This significantly enhances **testability, extensibility, and flexibility**, enabling independent development, testing, and replacement of components.
+```
+internal/service      CLI loop: play / kill / restart / exit
+      │
+internal/core         runtime layer
+  Quorum              creates members, starts/stops them, kill, notifier
+  Member              one goroutine per member: inbox, timers, transport, logging
+  DirectNetworker     non-blocking, lock-free message delivery
+      │ depends on
+internal/core/raft    domain layer (pure)
+  Node                Raft state and rules
+  Cluster             cluster size and majority
+  Message types, Role, Status, Output types
+```
 
-### 4.2 Decentralized Heartbeat Monitoring
+- **`raft.Node` is a rich domain entity.** Its state (role, term, vote, leader, election failures) is unexported and changes only inside its event methods: `OnElectionTimeout`, `OnMessage`, `OnHeartbeatTick` and `OnQuorumCheck`. It has no goroutines, timers, randomness, logging or I/O. Each method returns an ordered list of outputs, such as `Send`, `ResetElectionTimer`, `StartHeartbeats`, `BecameLeader` or `Halted`.
+- **`Member` is a thin runtime shell.** It turns inbox messages and timer ticks into node events, executes the outputs (send a message, reset a timer, log, notify, stop), and picks the randomized election timeout. Other goroutines read state only through `Member.Status()`.
+- **Benefit:** The Raft rules are unit-tested as plain function calls (`internal/core/raft/node_test.go`), and the integration tests in `internal/core` cover the concurrent behavior with a mock timer.
 
-- **Change**: Each Quorum member independently monitors heartbeats from all other active members. When a member suspects a node has failed, it initiates a vote request.
-- **Benefit**:
-- **Robustness & Responsiveness**: Avoids the Leader being a single point of monitoring bottleneck or failure, improving the system's **response speed** to failures.
-- **Trade-off**: In large clusters, N-to-N heartbeat monitoring can increase network load, but it is manageable for the simulated scale.
+Time (`Timer`), transport (`Networker`) and event notification (`QuorumEventNotifier`) are interfaces, so tests use `MockTimer` and `MockNotifier`.
 
-### 4.3 Majority Vote Mechanism (`MajorityVoteStrategy`)
+### 4.2 Raft Leader Election
 
-- **Change:** Formal removal of a member **must be based on a majority consensus** (`N/2 + 1` votes). Members send `RequestVote` upon suspicion and only propose removal after collecting enough votes.
-- **Benefit**:
-- **Consistency & Split-Brain Prevention**: This is a critical mechanism in distributed systems to prevent **Split-Brain** scenarios. It ensures that any state changes are acknowledged by the majority of nodes in the cluster, guaranteeing **data consistency**.
-- **Trade-off for Small Quorums**: In a 2-member Quorum, a majority requires 2 votes. If any single member fails, the Quorum cannot reach a majority, leading to the entire Quorum **halting (Fail-Stop)** rather than continuing with inconsistency. This is a design choice prioritizing **safety over availability**.
+- Election timeouts are randomized between 1500 ms and 3000 ms so members rarely time out together.
+- A candidate increments its term, votes for itself and sends `RequestVote` to its peers. It becomes leader once it has a majority of votes.
+- **Election Safety:** a member grants at most one vote per term, and a leader keeps the vote it cast for itself, so a term never has two leaders.
+- Any message with a higher term turns the receiver into a Follower of that term.
+- The leader sends `AppendEntries` heartbeats every 500 ms. A valid heartbeat resets the follower's election timer.
 
-### 4.4 Graceful Shutdown (`context.Context` and `sync.WaitGroup`)
+Log replication is out of scope; `AppendEntries` is used only as a heartbeat.
 
-- **Change**: Go's `context.Context` and `sync.WaitGroup` are extensively used to manage the lifecycle of `goroutines`. The `Quorum` holds a main `Context` which is propagated to all its internal `goroutines`.
-- **Benefit**: Ensures that all `goroutines` can **gracefully stop** and release resources when the application terminates or the Quorum ends, effectively preventing **goroutine leaks and deadlocks**.
+### 4.3 Leader Lease (Quorum Check)
 
-### 4.5 Simplified Leader Election
+Every 2000 ms the leader checks how many members acknowledged its heartbeats during that interval, counting itself. If that is below a majority, it steps down to Follower, so a leader cut off from the majority does not keep acting as leader.
 
-- **Change**: The current Leader election strategy simply selects the active member with the lowest ID.
-- **Benefit**: Simplifies the design to focus on **core functional validation** for the demo.
-- **Trade-off**: For production environments, more complex and fault-tolerant Leader election algorithms (e.g., Raft, Bully) are required to handle complex network and node states.
+### 4.4 Termination on Repeated Election Failure
+
+A member that starts more than `MaxElectionFailures` (5) consecutive elections without a leader appearing stops itself. When a majority of members is gone, the survivors cannot win an election, so they all stop. `Quorum` then notifies `NotifyQuorumEnded` and the CLI starts a new quorum.
+
+### 4.5 Graceful Shutdown and Concurrency
+
+- `context.Context` and `sync.WaitGroup` manage the lifecycle of every member goroutine, and `Quorum.Stop()` waits for all of them to exit.
+- Each member's state is touched only while its `Member` holds its mutex, so the concurrent tests pass with `go test -race`.
+- Messages go through `DirectNetworker`: one buffered inbox per member and non-blocking sends. A message to a full inbox is dropped, which Raft already tolerates.
 
 ## 5. Known Issues and Future Optimization Directions
 
-As a demo project, there are design trade-offs and future potential improvements outlined below.
+- **Static membership:** majority is computed over the initial cluster size. Killed members still count, so a cluster that lost its majority stops instead of shrinking. This is intended: it prefers safety over availability.
+- **Timing-based integration tests:** the `internal/core` tests drive a mock clock but still rely on short `time.Sleep` calls to let goroutines run. The Raft rules themselves are covered deterministically in `internal/core/raft`.
+- **Possible next steps:** log replication, persistence of term and vote, dynamic membership, simulated network delay and partitions in `Networker`, and a real transport such as gRPC.
 
-### 5.1 Considerations for Current Demo Version
+## 6. Core Evolution
 
-- **Fast Termination Behavior for 2-Member Quorums:**
-  - **Current State**: To provide quick responsiveness upon a single member failure, in a 2-member Quorum, when one member suspects the other due to heartbeat timeout and perceives itself as the only active observer, it directly triggers `Quorum.ProposeMemberRemoval`. This leads to both nodes making **independent decisions and entering a halted state (Fail-Stop)** simultaneously.
-  - **Trade-off**: This behavior provides immediate feedback for the demo and is considered safer than "inconsistency due to split-brain." However, in strict distributed systems, all removals should ideally be fully managed by a majority consensus mechanism or an arbiter service to avoid any independent decision ambiguities.
-
-### 5.2 Future Optimization Directions
-
-- **More Precise Unit Testing:**
-  - **Improvement**: Further abstract the `Networker` interface to support simulating **network delays or packet loss**.
-  - **Benefit**: Coupled with mocking frameworks like `gomock`, this enables highly deterministic unit tests that do not rely on `time.Sleep`, ensuring the correctness of each module's behavior in various scenarios.
-- **Production-Grade Leader Election and Consensus System:**
-  - **Improvement**: Introduce mature consensus algorithms such as **Raft or Paxos.**
-  - **Benefit**: Handles more complex scenarios like **network partitions, message loss, and node pauses**, providing robust consistency guarantees.
-- **Dynamic Member Management:**
-  - **Improvement**: Implement the ability to dynamically add or remove Quorum members.
-  - **Benefit**: Increases the system's **flexibility and operability**, making it closer to a real-world distributed application.
-- **State Persistence:**
-  - **Improvement**: Add a **persistence layer** for the Quorum's core state (e.g., member list, Leader ID).
-  - **Benefit**: Ensures the system can recover its state after restarts, improving **availability**.
-- **Actual Network Communication Layer:**
-  - **Improvement**: Replace the current simulated networker with an actual network communication module based on **TCP/UDP** or **gRPC**.
-  - **Benefit**: Allows Quorum members to **run on different machines**, simulating a true distributed environment.
-
-## 6. Core Evolution: From Old to New Version
-
-This project has undergone critical low-level architectural refactoring and concurrency model strengthening in the past five days, laying a solid foundation for future expansion.
-
-- **a. Decoupling Core Components and Interfaces**
-  - **Change:** Separated tightly coupled `Quorum` and `Member` logic, and introduced **interfaces** such as `Timer`, `Networker`, `ElectionStrategy`, and `QuorumEventNotifier`.
-  - **Benefit**: Achieved **loose coupling** between modules, significantly enhancing **testability, extensibility, and maintainability,** enabling mocking tests.
-- **b. Unified Majority Vote Mechanism**
-  - **Change:** Introduced `MajorityVoteStrategy`, where all member removals **must pass through majority consensus.** The problematic **old logic for "2-member Quorum failure local judgment" in** `Member.monitorHeartbeats` **that caused split-brain risk has been completely removed**.
-  - **Benefit**: Fundamentally addressed the **potential Split-Brain risk** present in the old version, ensuring **data consistency** in case of failures, and aligning its behavior more strictly with distributed system principles (preferring Fail-Stop over inconsistency).
-- **c. Rigorous Goroutine Lifecycle Management**
-  - **Change**: Extensively applied `context.Context` and `sync.WaitGroup` to manage the lifecycle of the `Quorum` and all its child `goroutines`.
-  - **Benefit**: Ensured the system can perform **Graceful Shutdown**, with all `goroutines` safely exiting upon application termination, effectively preventing **resource leaks and deadlocks**.
-- **d. Enhanced Test Framework Stability**
-  - **Change:** Introduced and refined mock objects such as `MockTimer`, `TestNetworkRouter`, and `MockNotifier`. **Fixed** `Context` **handling**. **Adjusted** `time.Sleep` **durations in** `TestKillMember` to ensure `goroutines` have sufficient time to process heartbeats and update states.
-  - **Benefit:** Significantly improved the **determinism and stability** of integration tests, reducing test failures caused by Go scheduler uncertainties.
-- **e. Centralized Quorum Termination Logic**
-  - **Change:** Consolidated all Quorum termination logic into `Quorum.ProposeMemberRemoval` and `MajorityVoteStrategy.cleanupExpiredVotes` as two unified entry points, using `sync.Once` to ensure it's triggered only once.
-  - **Benefit:** Simplified the termination path, eliminated potential logical conflicts and **uncertainty**, making the overall Quorum behavior more predictable.
+1. **Majority-vote removal (initial version):** members monitored each other's heartbeats and voted to remove suspected members; the lowest-ID alive member was leader.
+2. **Raft leader election:** election moved to Raft (terms, `RequestVote`, `AppendEntries` heartbeats, randomized timeouts), plus the election-failure threshold and quorum auto-termination. The central mutex networker was replaced by the lock-free `DirectNetworker`.
+3. **Rich domain model:** Raft rules moved out of `Member` into the pure `raft.Node`, and `Member` became a runtime shell. This refactor also fixed a leader voting twice in its own term, fixed data races in member state, wired leader-election notifications, and removed dead code. Design notes are in [`docs/refactor/`](docs/refactor/).

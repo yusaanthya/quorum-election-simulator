@@ -1,6 +1,6 @@
 # Rich Domain Model Refactor — Tasks
 
-- Status: Ready
+- Status: Done — T0–T6 committed on `feat/yusa_liu/migrate_message_handling_to_member`
 - Date: 2026-10-17
 - Input: [`02-spec.md`](02-spec.md)
 
@@ -11,7 +11,7 @@ race suite had to be green before any other task could be verified.
 In this sandbox, Go needs a writable build cache:
 `GOCACHE=$TMPDIR/gocache go test ./...`.
 
-## T0 — Fix: a leader must not vote twice in its term
+## T0 — Fix: a leader must not vote twice in its term ✅ `73f82b4`
 
 - Spec: §7, invariant §6.3-2.
 - Change: write a failing test first. Put a member in `Leader` for term T,
@@ -22,7 +22,7 @@ In this sandbox, Go needs a writable build cache:
 - Done when: the new test fails before the fix and passes after; the other
   tests are unchanged.
 
-## T1 — Safety net: race-free state reads ✅ done (uncommitted)
+## T1 — Safety net: race-free state reads ✅ `f091270`
 
 - Spec: acceptance §9-1.
 - Change (as implemented): `Run` holds `Member.mu` while it handles each
@@ -38,7 +38,7 @@ In this sandbox, Go needs a writable build cache:
 - Verified: `go test -race -count=5 ./...` passes. No production behavior
   changes.
 
-## T2 — Timer interface: add `ITicker.Reset`
+## T2 — Timer interface: add `ITicker.Reset` ✅ `f89376c`
 
 - Spec: §8.2.
 - Change: add `Reset(d time.Duration)` to `ITicker`, then replace both type
@@ -48,7 +48,7 @@ In this sandbox, Go needs a writable build cache:
 - Done when: the build passes with both `RealTicker` and `MockTickerWrapper`
   as `ITicker`, and the tests pass.
 
-## T3 — Domain package: `raft.Node`, `Cluster`, message types
+## T3 — Domain package: `raft.Node`, `Cluster`, message types ✅ `4bcfb5f`
 
 - Spec: §5, §6.
 - Change: create `internal/core/raft/` with:
@@ -69,7 +69,7 @@ In this sandbox, Go needs a writable build cache:
 - Done when: `go test ./internal/core/raft/` passes and the
   domain-purity greps (acceptance §9-2) print nothing.
 
-## T4 — `Member` becomes the runtime shell
+## T4 — `Member` becomes the runtime shell ✅ `8eae1a2`
 
 - Spec: §8.1, acceptance §9-3, §9-4.
 - Change: `Member` holds `*raft.Node` and its timers as fields. `Run()` drops
@@ -84,7 +84,7 @@ In this sandbox, Go needs a writable build cache:
 - Done when: all four integration tests pass under `-race -count=3`, and
   acceptance §9-3 and §9-4 hold.
 
-## T5 — `Quorum` cleanup and notifier wiring
+## T5 — `Quorum` cleanup and notifier wiring ✅ `95cce11`
 
 - Spec: §8.3.
 - Change: delete `QuorumNetworker`, `Broadcast`, `getAliveMemberIDs`,
@@ -96,16 +96,18 @@ In this sandbox, Go needs a writable build cache:
   that `MockNotifier` receives a leader-elected event.
 - Files: `internal/core/quorum.go`, `internal/core/member.go`,
   `internal/core/test_util.go`, `internal/core/core_test.go`.
-- Done when: the tests pass under `-race`, and `grep -n 'QuorumNetworker\|Broadcast\|getAliveMemberIDs\|TestNetworkRouter\|removed' internal/core/*.go` prints nothing.
+- Done when: the tests pass under `-race`, and `grep -n 'QuorumNetworker\|Broadcast\|getAliveMemberIDs\|TestNetworkRouter\|removed' internal/core/*.go` matches only comments: the commented-out `load_test.go` (follow-up in spec §10), a `DirectNetworker.Send` comment, and the no-op notifier's log text.
+- Also done: widened the tests' leader-wait window (spec §10, "Test timing").
 
-## T6 — Documentation
+## T6 — Documentation ✅
 
 - Spec: acceptance §9-7, inventory §4.6.
 - Change: rewrite `readme.md` §4–6 for the Raft design and the
   domain/runtime layering. Set the status of `02-spec.md` to `Implemented`.
 - Files: `readme.md`, `docs/refactor/02-spec.md`.
-- Done when: the readme no longer mentions `MajorityVoteStrategy`,
-  heartbeat-based removal votes, or lowest-ID leader election.
+- Done when: the readme no longer describes `MajorityVoteStrategy`,
+  heartbeat-based removal votes, or lowest-ID leader election as the current
+  design. They appear only as history in readme §6.
 
 ## Final verification
 

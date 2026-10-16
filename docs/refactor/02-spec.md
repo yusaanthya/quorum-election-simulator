@@ -1,6 +1,6 @@
 # Rich Domain Model Refactor — Spec
 
-- Status: Draft
+- Status: Implemented (see §10 for where the implementation differs)
 - Date: 2026-10-17
 - Input: [`01-inventory.md`](01-inventory.md)
 
@@ -78,7 +78,7 @@ package lets the compiler enforce it.
 type Node struct { /* unexported: id, peers, cluster, role, term, votedFor,
                       leaderID, votes, contacted, electionFailures, halted */ }
 
-func NewNode(id int, peers []int) *Node   // peers excludes id; Follower, term 0
+func NewNode(id int, members []int) *Node // members may include id; Follower, term 0
 
 func (n *Node) OnElectionTimeout() []Output
 func (n *Node) OnMessage(msg Message) []Output
@@ -99,7 +99,7 @@ type ResetElectionTimer   struct{}                    // shell picks a random 15
 type StopElectionTimer    struct{}
 type StartHeartbeats      struct{}                    // shell resets heartbeat + quorum-check tickers
 type StopHeartbeats       struct{}                    // shell stops both tickers
-type BecameLeader         struct{ Term int }
+type BecameLeader         struct{ Term, Votes int }
 type BecameFollower       struct{ Term int }
 type StartedElection      struct{ Term, Failures int }
 type VoteGranted          struct{ Candidate, Term int }
@@ -204,3 +204,27 @@ type assertions and notes in `becomeLeader` go away.
    `TestFailoverReElection`, `TestQuorumLossTermination`) still pass, reading
    state only through `Member.Status()`.
 7. `readme.md` describes the Raft-based design and the new layering.
+
+## 10. Implementation notes
+
+Where the implementation differs from the sections above, and why:
+
+- **§8.1 status reads.** The spec said the member stores a `Status` copy after
+  each event. Instead, `Member.mu` is held while an event is handled, and
+  `Member.Status()` takes the same lock and returns `node.Status()`. The
+  result is the same race-free copy, without a second copy of the state.
+- **§8.1 sends.** `RequestVote` and heartbeat messages used to be sent from one
+  goroutine per peer. They are now sent synchronously from `apply`, which keeps
+  output order deterministic. `DirectNetworker.SendTo` never blocks.
+- **§8.3 dead code.** `TestNetworkRouter` was removed as well, together with
+  the `Quorum` fields `timer` and `networker` that only the dead code used.
+  The router never carried traffic (inventory §4.4).
+- **Test timing.** The leader-wait loops in `core_test.go` now share
+  `electionWaitTicks = 100`. With 100 ms mock ticks, two followers time out in
+  the same tick in roughly 1 out of 15 rounds and split the vote. The old
+  3–4 s windows could not cover the retry, so `TestFailoverReElection` failed
+  in about 2 of 30 runs, including on `2e8df95` before the refactor.
+
+Follow-up, not done here: `internal/core/load_test.go` is fully commented out
+and refers to APIs removed long before this refactor (`q.LeaderID`,
+`Heartbeat`). Either rewrite it against `Member.Status()` or delete it.
