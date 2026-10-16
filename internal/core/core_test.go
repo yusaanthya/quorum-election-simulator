@@ -237,3 +237,25 @@ func TestQuorumLossTermination(t *testing.T) {
 	}
 	q.Stop()
 }
+
+func TestLeaderRefusesSecondVoteInSameTerm(t *testing.T) {
+	mockTimer := NewMockTimer(time.Now())
+	q := NewQuorum(3, mockTimer, NewMockNotifier())
+	defer q.Stop()
+
+	m := q.members[0]
+	electionTimer := mockTimer.NewTimer(time.Second)
+	heartbeatTicker := mockTimer.NewTicker(time.Second)
+	quorumCheckTicker := mockTimer.NewTicker(time.Second)
+
+	m.startElection(electionTimer)
+	m.handleRequestVoteReply(RequestVoteReply{Term: m.CurrentTerm, VoteGranted: true}, 1, heartbeatTicker, electionTimer, quorumCheckTicker)
+	if m.State != Leader {
+		t.Fatalf("Member 0 should be Leader, got %v", m.State)
+	}
+
+	reply := m.handleRequestVote(RequestVoteArgs{Term: m.CurrentTerm, CandidateID: 2}, electionTimer)
+	if reply.VoteGranted {
+		t.Errorf("Leader of term %d granted a second vote to member 2", m.CurrentTerm)
+	}
+}

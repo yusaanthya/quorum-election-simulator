@@ -310,7 +310,6 @@ func (m *Member) handleRequestVoteReply(reply RequestVoteReply, fromID int, hear
 func (m *Member) becomeLeader(heartbeatTicker ITicker, electionTimer ITimer, quorumCheckTicker ITicker) {
 	m.State = Leader
 	m.LeaderID = m.ID
-	m.VotedFor = -1
 	m.electionFailures = 0 // Reset failures on becoming leader
 
 	// Initialize contacted peers
