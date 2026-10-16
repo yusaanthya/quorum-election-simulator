@@ -321,47 +321,8 @@ func (m *Member) becomeLeader(heartbeatTicker ITicker, electionTimer ITimer, quo
 	// So we manually send once, then start ticker.
 	m.sendHeartbeats()
 
-	// Start quorum check
-	if ticker, ok := quorumCheckTicker.(interface{ Reset(d time.Duration) }); ok {
-		ticker.Reset(2000 * time.Millisecond)
-	} else {
-		// Just start it if implemented differently, but here we assume Reset capability
-	}
-
-	// Reset ticker to fire regularly
-	// Note: ITicker doesn't have Reset in stdlib Ticker, but we can Stop and NewTicker?
-	// Ah, Ticker just needs to be started?
-	// `NewTicker` creates a running ticker. `Stop` stops it.
-	// Getting a new ticker is expensive/complex here if we want to reuse the variable.
-	// But `ITicker` interface has no Reset.
-	// Actually typical pattern is creating a new ticker.
-	// BUT, my `Member` struct doesn't hold `heartbeatTicker`. It's local variable in `Run`.
-	// So I can't easily "replace" it if `becomeLeader` is called from handling message.
-	// Wait, `heartbeatTicker` IS passed to `becomeLeader`.
-	// But `heartbeatTicker` (ITicker) only has `Stop`. It doesn't have `Reset`.
-	// Standard `time.Ticker` has `Reset`. I should add `Reset` to `ITicker` interface!
-	// `time.Ticker` has `Reset(d Duration)` since Go 1.15.
-
-	// I forgot to add `Reset` to `ITicker` interface in `timer.go`.
-	// For now, I will assume I can just use it if I cast, or I should update `timer.go`?
-	// I should update `timer.go` to be safe.
-	// OR, I just assume `timer.go` update is too much overhead now and I just use `NewTicker` logic?
-	// But I can't replace the variable in `Run` loop from `handleMessage`.
-	// So `heartbeatTicker` MUST be capable of being reset or restarted.
-
-	// QUICK FIX: Add `Reset` to `ITicker` interface?
-	// Yes, `time.Ticker` has `Reset`.
-	// I'll assume I can add it quickly.
-
-	// Or, I can just not use Ticker for heartbeat and use another Timer?
-	// No, Ticker is better.
-
-	// Let's rely on `Reset`.
-	if ticker, ok := heartbeatTicker.(interface{ Reset(d time.Duration) }); ok {
-		ticker.Reset(500 * time.Millisecond)
-	} else {
-		logrus.Warn("Heartbeat ticker does not support Reset, heartbeats might be broken.")
-	}
+	quorumCheckTicker.Reset(2000 * time.Millisecond)
+	heartbeatTicker.Reset(500 * time.Millisecond)
 }
 
 func (m *Member) handleAppendEntries(args AppendEntriesArgs) AppendEntriesReply {

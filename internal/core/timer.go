@@ -8,6 +8,7 @@ import (
 type ITicker interface {
 	C() <-chan time.Time
 	Stop()
+	Reset(d time.Duration)
 }
 
 // ITimer abstracts time.Timer

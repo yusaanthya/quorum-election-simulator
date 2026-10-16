@@ -36,7 +36,6 @@ func (m *MockTickerWrapper) Stop() {
 	m.entry.running = false
 }
 
-// Reset is not part of ITicker usually, but we added it for heartbeat
 func (m *MockTickerWrapper) Reset(d time.Duration) {
 	m.mt.mu.Lock()
 	defer m.mt.mu.Unlock()
