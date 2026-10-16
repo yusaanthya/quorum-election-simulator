@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Anthya1104/quorum-election-cli/internal/core/raft"
 	"github.com/sirupsen/logrus"
 )
 
@@ -33,20 +34,20 @@ func (n *noOpNotifier) NotifyQuorumEnded() {
 }
 
 type Networker interface {
-	Send(msg Message)
-	SendTo(msg Message, toMemberID int)
+	Send(msg raft.Message)
+	SendTo(msg raft.Message, toMemberID int)
 }
 
 // DirectNetworker uses a map of channels for O(1) non-blocking sends.
 type DirectNetworker struct {
-	inboxes map[int]chan Message
+	inboxes map[int]chan raft.Message
 }
 
-func NewDirectNetworker(inboxes map[int]chan Message) *DirectNetworker {
+func NewDirectNetworker(inboxes map[int]chan raft.Message) *DirectNetworker {
 	return &DirectNetworker{inboxes: inboxes}
 }
 
-func (dn *DirectNetworker) Send(msg Message) {
+func (dn *DirectNetworker) Send(msg raft.Message) {
 	// Broadcast to all
 	for id := range dn.inboxes {
 		if id != msg.From {
@@ -55,7 +56,7 @@ func (dn *DirectNetworker) Send(msg Message) {
 	}
 }
 
-func (dn *DirectNetworker) SendTo(msg Message, toMemberID int) {
+func (dn *DirectNetworker) SendTo(msg raft.Message, toMemberID int) {
 	if ch, ok := dn.inboxes[toMemberID]; ok {
 		select {
 		case ch <- msg:
@@ -76,15 +77,15 @@ func NewQuorumNetworker(q *Quorum) *QuorumNetworker {
 	return &QuorumNetworker{q: q}
 }
 
-func (qn *QuorumNetworker) Send(msg Message) {
+func (qn *QuorumNetworker) Send(msg raft.Message) {
 	qn.q.Broadcast(msg)
 }
-func (qn *QuorumNetworker) SendTo(msg Message, toMemberID int) {
+func (qn *QuorumNetworker) SendTo(msg raft.Message, toMemberID int) {
 	qn.q.mu.Lock()
 	defer qn.q.mu.Unlock()
 
 	targetMember, ok := qn.q.members[toMemberID]
-	if ok && targetMember.Alive && !qn.q.removed[toMemberID] {
+	if ok && targetMember.IsAlive() && !qn.q.removed[toMemberID] {
 		select {
 		case targetMember.Inbox <- msg:
 		case <-qn.q.timer.NewTicker(100 * time.Millisecond).C():
@@ -132,9 +133,9 @@ func NewQuorum(n int, timer Timer, notifier QuorumEventNotifier) *Quorum {
 	}
 
 	// Phase 1: Pre-allocate all channels (Inboxes)
-	inboxes := make(map[int]chan Message, n)
+	inboxes := make(map[int]chan raft.Message, n)
 	for i := 0; i < n; i++ {
-		inboxes[i] = make(chan Message, 100)
+		inboxes[i] = make(chan raft.Message, 100)
 	}
 
 	// Phase 2: Create Lock-Free Networker
@@ -162,7 +163,7 @@ func (q *Quorum) Start() {
 	// Start all members
 	for _, m := range q.members {
 		q.internalWg.Add(1)
-		go m.Run(q)
+		go m.Run()
 	}
 
 	// Monitor for all members stopping
@@ -191,11 +192,11 @@ func (q *Quorum) KillMember(id int) {
 }
 
 // Broadcast to every Alive member
-func (q *Quorum) Broadcast(msg Message) {
+func (q *Quorum) Broadcast(msg raft.Message) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for _, m := range q.members {
-		if m.ID != msg.From && m.Alive && !q.removed[m.ID] {
+		if m.ID != msg.From && m.IsAlive() && !q.removed[m.ID] {
 			select {
 			case m.Inbox <- msg:
 			case <-q.timer.NewTicker(100 * time.Millisecond).C():

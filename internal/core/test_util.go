@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Anthya1104/quorum-election-cli/internal/core/raft"
 	"github.com/sirupsen/logrus"
 )
 
@@ -176,11 +177,11 @@ func NewTestNetworkRouter(q *Quorum) *TestNetworkRouter {
 	return &TestNetworkRouter{q: q}
 }
 
-func (r *TestNetworkRouter) Send(msg Message) {
+func (r *TestNetworkRouter) Send(msg raft.Message) {
 	r.q.mu.Lock()
 	defer r.q.mu.Unlock()
 	for _, m := range r.q.members {
-		if m.ID != msg.From && m.Alive && !r.q.removed[m.ID] {
+		if m.ID != msg.From && m.IsAlive() && !r.q.removed[m.ID] {
 			select {
 			case m.Inbox <- msg:
 			default:
@@ -190,10 +191,10 @@ func (r *TestNetworkRouter) Send(msg Message) {
 	}
 }
 
-func (r *TestNetworkRouter) SendTo(msg Message, toMemberID int) {
+func (r *TestNetworkRouter) SendTo(msg raft.Message, toMemberID int) {
 	r.q.mu.Lock()
 	defer r.q.mu.Unlock()
-	if targetMember, ok := r.q.members[toMemberID]; ok && targetMember.Alive && !r.q.removed[toMemberID] {
+	if targetMember, ok := r.q.members[toMemberID]; ok && targetMember.IsAlive() && !r.q.removed[toMemberID] {
 		select {
 		case targetMember.Inbox <- msg:
 		default:

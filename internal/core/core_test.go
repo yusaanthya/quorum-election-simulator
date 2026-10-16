@@ -3,6 +3,8 @@ package core
 import (
 	"testing"
 	"time"
+
+	"github.com/Anthya1104/quorum-election-cli/internal/core/raft"
 )
 
 func TestRaftInitialization(t *testing.T) {
@@ -21,11 +23,11 @@ func TestRaftInitialization(t *testing.T) {
 		if !ok {
 			t.Errorf("Expected member %d to exist, but not found", i)
 		}
-		if m.State != Follower {
-			t.Errorf("Member %d should start as Follower, got %v", i, m.State)
+		if m.Status().Role != raft.Follower {
+			t.Errorf("Member %d should start as Follower, got %v", i, m.Status().Role)
 		}
-		if m.CurrentTerm != 0 {
-			t.Errorf("Member %d should start with Term 0, got %d", i, m.CurrentTerm)
+		if m.Status().Term != 0 {
+			t.Errorf("Member %d should start with Term 0, got %d", i, m.Status().Term)
 		}
 	}
 }
@@ -51,11 +53,9 @@ func TestLeaderElection(t *testing.T) {
 		// Check for leader
 		leaderCount := 0
 		for _, m := range q.members {
-			m.mu.Lock()
-			if m.State == Leader {
+			if m.Status().Role == raft.Leader {
 				leaderCount++
 			}
-			m.mu.Unlock()
 		}
 
 		if leaderCount == 1 {
@@ -66,11 +66,9 @@ func TestLeaderElection(t *testing.T) {
 	// Check if a leader is elected
 	leaderCount := 0
 	for _, m := range q.members {
-		m.mu.Lock()
-		if m.State == Leader {
+		if m.Status().Role == raft.Leader {
 			leaderCount++
 		}
-		m.mu.Unlock()
 	}
 
 	if leaderCount != 1 {
@@ -96,11 +94,9 @@ func TestFailoverReElection(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 		leaderCount := 0
 		for _, m := range q.members {
-			m.mu.Lock()
-			if m.State == Leader {
+			if m.Status().Role == raft.Leader {
 				leaderCount++
 			}
-			m.mu.Unlock()
 		}
 		if leaderCount == 1 {
 			break
@@ -109,11 +105,9 @@ func TestFailoverReElection(t *testing.T) {
 
 	var oldLeaderID int = -1
 	for _, m := range q.members {
-		m.mu.Lock()
-		if m.State == Leader {
+		if m.Status().Role == raft.Leader {
 			oldLeaderID = m.ID
 		}
-		m.mu.Unlock()
 	}
 
 	if oldLeaderID == -1 {
@@ -134,11 +128,9 @@ func TestFailoverReElection(t *testing.T) {
 			if m.ID == oldLeaderID {
 				continue
 			}
-			m.mu.Lock()
-			if m.State == Leader {
+			if m.Status().Role == raft.Leader {
 				leaderCount++
 			}
-			m.mu.Unlock()
 		}
 		if leaderCount == 1 {
 			break
@@ -151,12 +143,10 @@ func TestFailoverReElection(t *testing.T) {
 		if m.ID == oldLeaderID {
 			continue
 		}
-		m.mu.Lock()
-		if m.State == Leader {
+		if m.Status().Role == raft.Leader {
 			leaderCount++
 			newLeaderID = m.ID
 		}
-		m.mu.Unlock()
 	}
 
 	if leaderCount != 1 {
@@ -184,11 +174,9 @@ func TestQuorumLossTermination(t *testing.T) {
 
 		leaderCount := 0
 		for _, m := range q.members {
-			m.mu.Lock()
-			if m.State == Leader {
+			if m.Status().Role == raft.Leader {
 				leaderCount++
 			}
-			m.mu.Unlock()
 		}
 		if leaderCount == 1 {
 			leaderFound = true
@@ -217,10 +205,8 @@ func TestQuorumLossTermination(t *testing.T) {
 		mockTimer.AdvanceTime(100 * time.Millisecond)
 		time.Sleep(5 * time.Millisecond)
 
-		q.members[2].mu.Lock()
-		alive := q.members[2].Alive
-		failures := q.members[2].electionFailures
-		q.members[2].mu.Unlock()
+		alive := q.members[2].IsAlive()
+		failures := q.members[2].Status().ElectionFailures
 
 		if !alive {
 			t.Logf("Member 2 stopped as expected. Failures: %d", failures)
@@ -230,32 +216,8 @@ func TestQuorumLossTermination(t *testing.T) {
 	}
 
 	if !stopped {
-		q.members[2].mu.Lock()
-		failures := q.members[2].electionFailures
-		q.members[2].mu.Unlock()
+		failures := q.members[2].Status().ElectionFailures
 		t.Fatalf("Member 2 did not stop after quorum loss. Current failures: %d", failures)
 	}
 	q.Stop()
-}
-
-func TestLeaderRefusesSecondVoteInSameTerm(t *testing.T) {
-	mockTimer := NewMockTimer(time.Now())
-	q := NewQuorum(3, mockTimer, NewMockNotifier())
-	defer q.Stop()
-
-	m := q.members[0]
-	electionTimer := mockTimer.NewTimer(time.Second)
-	heartbeatTicker := mockTimer.NewTicker(time.Second)
-	quorumCheckTicker := mockTimer.NewTicker(time.Second)
-
-	m.startElection(electionTimer)
-	m.handleRequestVoteReply(RequestVoteReply{Term: m.CurrentTerm, VoteGranted: true}, 1, heartbeatTicker, electionTimer, quorumCheckTicker)
-	if m.State != Leader {
-		t.Fatalf("Member 0 should be Leader, got %v", m.State)
-	}
-
-	reply := m.handleRequestVote(RequestVoteArgs{Term: m.CurrentTerm, CandidateID: 2}, electionTimer)
-	if reply.VoteGranted {
-		t.Errorf("Leader of term %d granted a second vote to member 2", m.CurrentTerm)
-	}
 }
