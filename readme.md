@@ -126,6 +126,8 @@ internal/core/raft    domain layer (pure)
 
 Time (`Timer`), transport (`Networker`) and event notification (`QuorumEventNotifier`) are interfaces, so tests use `MockTimer` and `MockNotifier`.
 
+Diagrams of the layers, types, event flow and role transitions are in [`docs/architecture.md`](docs/architecture.md).
+
 ### 4.2 Raft Leader Election
 
 - Election timeouts are randomized between 1500 ms and 3000 ms so members rarely time out together.
