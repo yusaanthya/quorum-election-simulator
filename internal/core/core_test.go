@@ -207,7 +207,7 @@ func TestQuorumLossTermination(t *testing.T) {
 	t.Log("Killed members 0 and 1. Surviving member: 2")
 
 	// Advance time to allow accumulation of election failures
-	startState := q.members[2].Alive
+	startState := q.members[2].IsAlive()
 	if !startState {
 		t.Fatal("Member 2 should be alive initially")
 	}

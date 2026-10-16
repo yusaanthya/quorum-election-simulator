@@ -180,7 +180,7 @@ func (q *Quorum) Start() {
 func (q *Quorum) KillMember(id int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if m, ok := q.members[id]; ok && m.Alive {
+	if m, ok := q.members[id]; ok && m.IsAlive() {
 		m.Stop()
 		q.removed[id] = true // Mark as removed effectively
 		logrus.Infof("CLI Command: Member %d is now unresponsive (killed).", id)
@@ -219,7 +219,7 @@ func (q *Quorum) Stop() {
 
 	logrus.Info("Stopping quorum...")
 	for _, m := range q.members {
-		if m.Alive {
+		if m.IsAlive() {
 			m.Stop()
 		}
 	}

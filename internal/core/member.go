@@ -93,17 +93,24 @@ func (m *Member) Run(q *Quorum) {
 			return
 
 		case msg := <-m.Inbox:
+			m.mu.Lock()
 			m.handleMessage(msg, electionTimer, heartbeatTicker, quorumCheckTicker)
+			m.mu.Unlock()
 
 		case <-electionTimer.C():
 			// Election timeout
+			m.mu.Lock()
 			m.startElection(electionTimer)
+			m.mu.Unlock()
 
 		case <-heartbeatTicker.C():
 			// Send heartbeats if leader
+			m.mu.Lock()
 			m.sendHeartbeats()
+			m.mu.Unlock()
 
 		case <-quorumCheckTicker.C():
+			m.mu.Lock()
 			if m.State == Leader {
 				if len(m.contactedPeers) < (len(m.peers)+1)/2+1 {
 					logrus.Warnf("Member %d: Lost quorum (contacted %d peers). Stepping down.", m.ID, len(m.contactedPeers))
@@ -115,6 +122,7 @@ func (m *Member) Run(q *Quorum) {
 					m.contactedPeers[m.ID] = true
 				}
 			}
+			m.mu.Unlock()
 		}
 	}
 }
@@ -223,7 +231,7 @@ func (m *Member) startElection(electionTimer ITimer) {
 	m.electionFailures++
 	if m.electionFailures > MaxElectionFailures {
 		logrus.Errorf("Member %d: Exceeded max election failures (%d). Stopping.", m.ID, MaxElectionFailures)
-		m.Stop()
+		m.stopLocked()
 		return
 	}
 
@@ -397,7 +405,20 @@ func (m *Member) sendHeartbeats() {
 }
 
 func (m *Member) Stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopLocked()
+}
+
+// stopLocked requires m.mu to be held.
+func (m *Member) stopLocked() {
 	m.Alive = false
 	m.cancel()
 	logrus.Infof("Member %d: Stopped.", m.ID)
+}
+
+func (m *Member) IsAlive() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.Alive
 }
