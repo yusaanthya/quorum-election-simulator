@@ -189,14 +189,16 @@ func TestFollowerAcceptsLeaderHeartbeat(t *testing.T) {
 // --- Guards ---
 
 func TestStaleRequestVoteIsRejected(t *testing.T) {
-	n := newLeader(t)
-	out := n.OnMessage(requestVote(2, 0, 0))
+	// The node has not voted in its term, so only the term check can refuse the request.
+	n := NewNode(0, members(3))
+	n.OnMessage(appendEntries(1, 0, 3))
+	out := n.OnMessage(requestVote(2, 0, 2))
 	reply := sentTo(out)[2].Payload.(RequestVoteReply)
-	if reply.VoteGranted || reply.Term != 1 {
-		t.Errorf("reply = %+v, want rejection at term 1", reply)
+	if reply.VoteGranted || reply.Term != 3 {
+		t.Errorf("reply = %+v, want rejection at term 3", reply)
 	}
-	if n.Status().Role != Leader {
-		t.Errorf("stale request changed role to %v", n.Status().Role)
+	if has(out, ResetElectionTimer{}) {
+		t.Error("stale request reset the election timer")
 	}
 }
 
@@ -213,12 +215,48 @@ func TestStaleAppendEntriesIsRejected(t *testing.T) {
 }
 
 func TestNonCandidateIgnoresVoteReply(t *testing.T) {
-	n := NewNode(0, members(3))
-	if out := n.OnMessage(voteReply(1, 0, 0, true)); out != nil {
-		t.Errorf("expected no outputs, got %#v", out)
+	t.Run("leader that stepped down", func(t *testing.T) {
+		// It still holds votes {0, 1} for term 1, so one more grant would reach a majority.
+		n := newLeader(t)
+		n.OnQuorumCheck()
+		if out := n.OnMessage(voteReply(2, 0, 1, true)); out != nil {
+			t.Errorf("expected no outputs, got %#v", out)
+		}
+		if n.Status().Role != Follower {
+			t.Errorf("late grant made the node %v without an election", n.Status().Role)
+		}
+	})
+	t.Run("leader", func(t *testing.T) {
+		n := newLeader(t)
+		if out := n.OnMessage(voteReply(2, 0, 1, true)); out != nil {
+			t.Errorf("late grant to a leader produced %#v", out)
+		}
+	})
+}
+
+func TestRejectedVoteIsNotCounted(t *testing.T) {
+	n := NewNode(0, members(3)) // majority is 2: self plus one more
+	n.OnElectionTimeout()
+	n.OnMessage(voteReply(1, 0, 1, false))
+	if n.Status().Role != Candidate {
+		t.Errorf("a rejection made the candidate %v", n.Status().Role)
 	}
-	if n.Status().Role != Follower {
-		t.Errorf("Follower became %v from a vote reply", n.Status().Role)
+}
+
+func TestStaleVoteReplyIsNotCounted(t *testing.T) {
+	n := NewNode(0, members(3))
+	n.OnElectionTimeout()
+	n.OnElectionTimeout() // term 2
+	n.OnMessage(voteReply(1, 0, 1, true))
+	if s := n.Status(); s.Role != Candidate || s.Term != 2 {
+		t.Errorf("Status() = %+v, want Candidate term 2: a term-1 grant must not count", s)
+	}
+}
+
+func TestGrantingVoteResetsElectionTimer(t *testing.T) {
+	n := NewNode(0, members(3))
+	if !has(n.OnMessage(requestVote(1, 0, 0)), ResetElectionTimer{}) {
+		t.Error("granting a vote did not reset the election timer")
 	}
 }
 

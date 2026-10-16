@@ -31,8 +31,8 @@ In this sandbox, Go needs a writable build cache:
   takes `mu`. `stopLocked()` is used from `startElection`, which already holds
   `mu`. `IsAlive()` replaces the unguarded `m.Alive` reads in
   `Quorum.KillMember`, `Quorum.Stop` and `TestQuorumLossTermination`.
-  Replacing this lock with the `Member.Status()` snapshot from spec §8.1 is
-  part of T4.
+  T4 kept this lock and added `Member.Status()`, which reads the node under it
+  instead of a stored snapshot (spec §10).
 - Files: `internal/core/member.go`, `internal/core/quorum.go`,
   `internal/core/core_test.go`.
 - Verified: `go test -race -count=5 ./...` passes. No production behavior
