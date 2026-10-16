@@ -7,6 +7,11 @@ import (
 	"github.com/Anthya1104/quorum-election-cli/internal/core/raft"
 )
 
+// electionWaitTicks bounds how many 100ms mock-time ticks a test waits for a leader.
+// Members whose timeouts land in the same tick split the vote and retry after another
+// randomized timeout (up to 3s), so the window covers several rounds.
+const electionWaitTicks = 100
+
 func TestRaftInitialization(t *testing.T) {
 	mockTimer := NewMockTimer(time.Now())
 	mockNotifier := NewMockNotifier()
@@ -36,7 +41,6 @@ func TestLeaderElection(t *testing.T) {
 	mockTimer := NewMockTimer(time.Now())
 	mockNotifier := NewMockNotifier()
 	q := NewQuorum(3, mockTimer, mockNotifier)
-	q.networker = NewTestNetworkRouter(q) // Use router to deliver messages
 
 	q.Start()
 	defer q.Stop()
@@ -45,8 +49,8 @@ func TestLeaderElection(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Advance time gradually to allow randomized timeouts to trigger naturally
-	// Max wait 3 seconds, tick every 100ms
-	for i := 0; i < 30; i++ {
+	// Tick every 100ms, up to electionWaitTicks
+	for i := 0; i < electionWaitTicks; i++ {
 		mockTimer.AdvanceTime(100 * time.Millisecond)
 		time.Sleep(10 * time.Millisecond) // Allow goroutines to run
 
@@ -74,13 +78,17 @@ func TestLeaderElection(t *testing.T) {
 	if leaderCount != 1 {
 		t.Errorf("Expected exactly 1 leader, got %d", leaderCount)
 	}
+
+	leaderID := waitForChannelReceive(t, mockNotifier.leaderElectedCh, time.Second, "Leader election notification")
+	if q.members[leaderID].Status().Role != raft.Leader {
+		t.Errorf("Notifier reported member %d as leader, but it is %v", leaderID, q.members[leaderID].Status().Role)
+	}
 }
 
 func TestFailoverReElection(t *testing.T) {
 	mockTimer := NewMockTimer(time.Now())
 	mockNotifier := NewMockNotifier()
 	q := NewQuorum(3, mockTimer, mockNotifier)
-	q.networker = NewTestNetworkRouter(q)
 
 	q.Start()
 	defer q.Stop()
@@ -89,7 +97,7 @@ func TestFailoverReElection(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Initial election
-	for i := 0; i < 30; i++ {
+	for i := 0; i < electionWaitTicks; i++ {
 		mockTimer.AdvanceTime(100 * time.Millisecond)
 		time.Sleep(10 * time.Millisecond)
 		leaderCount := 0
@@ -119,7 +127,7 @@ func TestFailoverReElection(t *testing.T) {
 
 	// Advance time for others to timeout (heartbeat timeout ~0.5s, election timeout 1.5s+)
 	// Wait enough for election timeout
-	for i := 0; i < 40; i++ {
+	for i := 0; i < electionWaitTicks; i++ {
 		mockTimer.AdvanceTime(100 * time.Millisecond)
 		time.Sleep(10 * time.Millisecond)
 
@@ -162,13 +170,12 @@ func TestQuorumLossTermination(t *testing.T) {
 	mockTimer := NewMockTimer(time.Now())
 	mockNotifier := NewMockNotifier()
 	q := NewQuorum(3, mockTimer, mockNotifier)
-	q.networker = NewTestNetworkRouter(q)
 	q.Start()
 
 	// Wait for leader election
 	time.Sleep(50 * time.Millisecond)
 	leaderFound := false
-	for i := 0; i < 50; i++ {
+	for i := 0; i < electionWaitTicks; i++ {
 		mockTimer.AdvanceTime(100 * time.Millisecond)
 		time.Sleep(10 * time.Millisecond)
 

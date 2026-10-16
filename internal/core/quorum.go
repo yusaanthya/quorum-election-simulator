@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/Anthya1104/quorum-election-cli/internal/core/raft"
 	"github.com/sirupsen/logrus"
@@ -69,46 +68,14 @@ func (dn *DirectNetworker) SendTo(msg raft.Message, toMemberID int) {
 	}
 }
 
-type QuorumNetworker struct {
-	q *Quorum
-}
-
-func NewQuorumNetworker(q *Quorum) *QuorumNetworker {
-	return &QuorumNetworker{q: q}
-}
-
-func (qn *QuorumNetworker) Send(msg raft.Message) {
-	qn.q.Broadcast(msg)
-}
-func (qn *QuorumNetworker) SendTo(msg raft.Message, toMemberID int) {
-	qn.q.mu.Lock()
-	defer qn.q.mu.Unlock()
-
-	targetMember, ok := qn.q.members[toMemberID]
-	if ok && targetMember.IsAlive() && !qn.q.removed[toMemberID] {
-		select {
-		case targetMember.Inbox <- msg:
-		case <-qn.q.timer.NewTicker(100 * time.Millisecond).C():
-			logrus.Warnf("Failed to send message from %d to %d (type %v): inbox full or blocked.", msg.From, toMemberID, msg.Type)
-		}
-	} else {
-		logrus.Debugf("Cannot send message from %d to %d (type %v): target not alive or removed.", msg.From, toMemberID, msg.Type)
-	}
-}
-
 type Quorum struct {
 	members map[int]*Member
 	mu      sync.Mutex
 
-	removed map[int]bool // Stores IDs of officially removed members
-
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	timer Timer
-
 	notifier   QuorumEventNotifier
-	networker  Networker
 	internalWg sync.WaitGroup
 
 	quorumEndedOnce sync.Once
@@ -123,10 +90,8 @@ func NewQuorum(n int, timer Timer, notifier QuorumEventNotifier) *Quorum {
 
 	q := &Quorum{
 		members:         make(map[int]*Member),
-		removed:         make(map[int]bool),
 		ctx:             childCtx,
 		cancel:          cancel,
-		timer:           timer,
 		notifier:        notifier,
 		internalWg:      sync.WaitGroup{},
 		quorumEndedOnce: sync.Once{},
@@ -139,8 +104,7 @@ func NewQuorum(n int, timer Timer, notifier QuorumEventNotifier) *Quorum {
 	}
 
 	// Phase 2: Create Lock-Free Networker
-	// Use DirectNetworker instead of QuorumNetworker (dropping the central mutex!)
-	q.networker = NewDirectNetworker(inboxes)
+	networker := NewDirectNetworker(inboxes)
 
 	// Phase 3: Create Members with injected dependencies
 	allMemberIDs := make([]int, 0, n)
@@ -150,7 +114,7 @@ func NewQuorum(n int, timer Timer, notifier QuorumEventNotifier) *Quorum {
 
 	for i := 0; i < n; i++ {
 		// Pass the pre-allocated inbox to the member
-		q.members[i] = NewMember(childCtx, i, timer, q.networker, allMemberIDs, inboxes[i], &q.internalWg)
+		q.members[i] = NewMember(childCtx, i, timer, networker, notifier, allMemberIDs, inboxes[i], &q.internalWg)
 	}
 	return q
 }
@@ -183,35 +147,11 @@ func (q *Quorum) KillMember(id int) {
 	defer q.mu.Unlock()
 	if m, ok := q.members[id]; ok && m.IsAlive() {
 		m.Stop()
-		q.removed[id] = true // Mark as removed effectively
 		logrus.Infof("CLI Command: Member %d is now unresponsive (killed).", id)
 		q.notifier.NotifyMemberRemoved(id)
 	} else {
 		logrus.Warnf("CLI Command: Member %d not found or already dead.", id)
 	}
-}
-
-// Broadcast to every Alive member
-func (q *Quorum) Broadcast(msg raft.Message) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	for _, m := range q.members {
-		if m.ID != msg.From && m.IsAlive() && !q.removed[m.ID] {
-			select {
-			case m.Inbox <- msg:
-			case <-q.timer.NewTicker(100 * time.Millisecond).C():
-				logrus.Warnf("Failed to send message from %d to %d (type %v): inbox full or blocked.", msg.From, m.ID, msg.Type)
-			}
-		}
-	}
-}
-
-func (q *Quorum) getAliveMemberIDs() []int {
-	ids := []int{}
-	for id := range q.members {
-		ids = append(ids, id)
-	}
-	return ids
 }
 
 func (q *Quorum) Stop() {

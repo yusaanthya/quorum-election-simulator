@@ -34,6 +34,7 @@ type Member struct {
 
 	timer     Timer
 	networker Networker
+	notifier  QuorumEventNotifier
 	wg        *sync.WaitGroup
 
 	// Owned by the Run goroutine
@@ -42,7 +43,7 @@ type Member struct {
 	quorumCheckTicker ITicker
 }
 
-func NewMember(ctx context.Context, id int, timer Timer, networker Networker, initialPeers []int, inbox chan raft.Message, wg *sync.WaitGroup) *Member {
+func NewMember(ctx context.Context, id int, timer Timer, networker Networker, notifier QuorumEventNotifier, initialPeers []int, inbox chan raft.Message, wg *sync.WaitGroup) *Member {
 	memberCtx, cancel := context.WithCancel(ctx)
 
 	return &Member{
@@ -53,6 +54,7 @@ func NewMember(ctx context.Context, id int, timer Timer, networker Networker, in
 		cancel:    cancel,
 		timer:     timer,
 		networker: networker,
+		notifier:  notifier,
 		wg:        wg,
 	}
 }
@@ -127,6 +129,7 @@ func (m *Member) apply(outputs []raft.Output) {
 			logrus.Infof("Member %d: Voted for %d in term %d", m.ID, o.Candidate, o.Term)
 		case raft.BecameLeader:
 			logrus.Infof("Member %d: Won election for term %d with %d votes", m.ID, o.Term, o.Votes)
+			m.notifier.NotifyLeaderElected(m.ID)
 		case raft.LostQuorum:
 			logrus.Warnf("Member %d: Lost quorum (contacted %d peers). Stepping down.", m.ID, o.Contacted)
 		case raft.Halted:

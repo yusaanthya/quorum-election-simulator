@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Anthya1104/quorum-election-cli/internal/core/raft"
 	"github.com/sirupsen/logrus"
 )
 
@@ -162,47 +161,6 @@ func (m *MockTimer) AdvanceTime(d time.Duration) {
 	}
 
 	// Sort by deadline? No need if we just scan all.
-}
-
-// ... (TestNetworkRouter and MockNotifier remain same)
-
-// ========================
-// mock inbox TestNetworkRouter for testing
-// ========================
-type TestNetworkRouter struct {
-	q *Quorum
-}
-
-func NewTestNetworkRouter(q *Quorum) *TestNetworkRouter {
-	return &TestNetworkRouter{q: q}
-}
-
-func (r *TestNetworkRouter) Send(msg raft.Message) {
-	r.q.mu.Lock()
-	defer r.q.mu.Unlock()
-	for _, m := range r.q.members {
-		if m.ID != msg.From && m.IsAlive() && !r.q.removed[m.ID] {
-			select {
-			case m.Inbox <- msg:
-			default:
-				logrus.Warnf("TestNetworkRouter: Failed to send broadcast message from %d to %d (type %v): inbox full.", msg.From, m.ID, msg.Type)
-			}
-		}
-	}
-}
-
-func (r *TestNetworkRouter) SendTo(msg raft.Message, toMemberID int) {
-	r.q.mu.Lock()
-	defer r.q.mu.Unlock()
-	if targetMember, ok := r.q.members[toMemberID]; ok && targetMember.IsAlive() && !r.q.removed[toMemberID] {
-		select {
-		case targetMember.Inbox <- msg:
-		default:
-			logrus.Warnf("TestNetworkRouter: Failed to send direct message from %d to %d (type %v): inbox full.", msg.From, toMemberID, msg.Type)
-		}
-	} else {
-		logrus.Debugf("TestNetworkRouter: Cannot send message from %d to %d (type %v): target not alive or removed.", msg.From, toMemberID, msg.Type)
-	}
 }
 
 // ========================
