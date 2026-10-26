@@ -2,232 +2,155 @@ package core
 
 import (
 	"context"
+	"math/rand"
 	"sync"
 	"time"
 
+	"github.com/Anthya1104/quorum-election-cli/internal/core/raft"
 	"github.com/sirupsen/logrus"
 )
 
 const (
-	HeartbeatInterval   = 2 * time.Second
-	HeartbeatTimeout    = 4 * time.Second
-	VoteDecisionTimeout = 2 * HeartbeatTimeout
+	heartbeatInterval   = 500 * time.Millisecond
+	quorumCheckInterval = 2000 * time.Millisecond
 )
 
-type MessageType int
-
-const (
-	Heartbeat MessageType = iota
-	RequestVote
-	Vote
-	// extnd for different type strategies e.g.
-	// ElectionMessage // for Bully algorithm
-	// VictoryMessage  // for Bully algorithm
-	// AppendEntries   // for Raft
-	// RequestVoteRPC  // for Raft
-)
-
-type Message struct {
-	From    int
-	To      int
-	Type    MessageType
-	Payload interface{}
+// electionTimeout is randomized in [1500ms, 3000ms) so members rarely time out together.
+func electionTimeout() time.Duration {
+	return time.Duration(1500+rand.Intn(1500)) * time.Millisecond
 }
 
+// Member runs one raft.Node: it turns inbox messages and timer ticks into node events
+// and executes the outputs the node returns.
 type Member struct {
-	ID       int
-	Alive    bool
-	Inbox    chan Message
-	lastSeen map[int]time.Time
-	mu       sync.Mutex
+	ID    int
+	Inbox chan raft.Message
+
+	mu   sync.Mutex // Guards node; held while an event is handled
+	node *raft.Node
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	Election  ElectionStrategy
 	timer     Timer
 	networker Networker
+	notifier  QuorumEventNotifier
 	wg        *sync.WaitGroup
+
+	// Owned by the Run goroutine
+	electionTimer     ITimer
+	heartbeatTicker   ITicker
+	quorumCheckTicker ITicker
 }
 
-func NewMember(ctx context.Context, id int, strategy ElectionStrategy, timer Timer, networker Networker, initialPeers []int, wg *sync.WaitGroup) *Member {
+func NewMember(ctx context.Context, id int, timer Timer, networker Networker, notifier QuorumEventNotifier, initialPeers []int, inbox chan raft.Message, wg *sync.WaitGroup) *Member {
 	memberCtx, cancel := context.WithCancel(ctx)
-	logrus.Infof("Member %v: Hi", id)
 
-	m := &Member{
+	return &Member{
 		ID:        id,
-		Alive:     true,
-		Inbox:     make(chan Message, 10),
-		lastSeen:  make(map[int]time.Time),
+		Inbox:     inbox, // Use injected inbox
+		node:      raft.NewNode(id, initialPeers),
 		ctx:       memberCtx,
 		cancel:    cancel,
-		Election:  strategy,
 		timer:     timer,
 		networker: networker,
+		notifier:  notifier,
 		wg:        wg,
 	}
-
-	// init lastSeen to prevent suspecting others immediately
-	now := m.timer.Now()
-	for _, peerID := range initialPeers {
-		if peerID != m.ID {
-			m.lastSeen[peerID] = now
-		}
-	}
-	return m
 }
 
-func (m *Member) Run(q *Quorum) {
+func (m *Member) Run() {
 	defer m.wg.Done()
+	logrus.Infof("Member %d: Started Raft Node", m.ID)
 
-	go m.sendHeartbeats()
-	go m.monitorHeartbeats(q)
+	m.electionTimer = m.timer.NewTimer(electionTimeout())
+
+	// Leader-only tickers, stopped until the node becomes leader
+	m.heartbeatTicker = m.timer.NewTicker(heartbeatInterval)
+	m.heartbeatTicker.Stop()
+	m.quorumCheckTicker = m.timer.NewTicker(quorumCheckInterval)
+	m.quorumCheckTicker.Stop()
 
 	for {
 		select {
+		case <-m.ctx.Done():
+			m.electionTimer.Stop()
+			m.heartbeatTicker.Stop()
+			m.quorumCheckTicker.Stop()
+			return
+
 		case msg := <-m.Inbox:
-			m.handleMessage(msg, q)
-		case <-m.ctx.Done():
-			logrus.Infof("Member %d: context cancelled, stopping run loop.", m.ID)
-			return
+			m.handle(func() []raft.Output { return m.node.OnMessage(msg) })
+
+		case <-m.electionTimer.C():
+			m.handle(m.node.OnElectionTimeout)
+
+		case <-m.heartbeatTicker.C():
+			m.handle(m.node.OnHeartbeatTick)
+
+		case <-m.quorumCheckTicker.C():
+			m.handle(m.node.OnQuorumCheck)
 		}
 	}
 }
 
-func (m *Member) sendHeartbeats() {
-	ticker := m.timer.NewTicker(HeartbeatInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			if m.Alive {
-				msg := Message{From: m.ID, Type: Heartbeat}
-				m.networker.Send(msg)
-				logrus.Debugf("Member %d: Sent heartbeat", m.ID)
-			}
-		case <-m.ctx.Done():
-			logrus.Debugf("Member %d: Heartbeat sender stopped.", m.ID)
-			return
+func (m *Member) handle(event func() []raft.Output) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// A stopped member processes nothing, even if select picked an event over ctx.Done
+	if m.ctx.Err() != nil {
+		return
+	}
+	m.apply(event())
+}
+
+func (m *Member) apply(outputs []raft.Output) {
+	for _, out := range outputs {
+		switch o := out.(type) {
+		case raft.Send:
+			m.networker.SendTo(o.Msg, o.Msg.To)
+		case raft.ResetElectionTimer:
+			m.electionTimer.Stop()
+			m.electionTimer.Reset(electionTimeout())
+		case raft.StopElectionTimer:
+			m.electionTimer.Stop()
+		case raft.StartHeartbeats:
+			m.quorumCheckTicker.Reset(quorumCheckInterval)
+			m.heartbeatTicker.Reset(heartbeatInterval)
+		case raft.StopHeartbeats:
+			m.heartbeatTicker.Stop()
+			m.quorumCheckTicker.Stop()
+		case raft.BecameFollower:
+			logrus.Infof("Member %d: Becoming Follower for term %d", m.ID, o.Term)
+		case raft.StartedElection:
+			logrus.Infof("Member %d: Starting election for term %d (Failures: %d)", m.ID, o.Term, o.Failures)
+		case raft.VoteGranted:
+			logrus.Infof("Member %d: Voted for %d in term %d", m.ID, o.Candidate, o.Term)
+		case raft.BecameLeader:
+			logrus.Infof("Member %d: Won election for term %d with %d votes", m.ID, o.Term, o.Votes)
+			m.notifier.NotifyLeaderElected(m.ID)
+		case raft.LostQuorum:
+			logrus.Warnf("Member %d: Lost quorum (contacted %d peers). Stepping down.", m.ID, o.Contacted)
+		case raft.Halted:
+			logrus.Errorf("Member %d: Exceeded max election failures (%d). Stopping.", m.ID, raft.MaxElectionFailures)
+			m.Stop()
 		}
 	}
 }
 
-// periodical monitoring haertbeat between members to trigger suspecting mechanism
-func (m *Member) monitorHeartbeats(q *Quorum) {
-	ticker := m.timer.NewTicker(HeartbeatTimeout / 2)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			m.mu.Lock()
-			suspects := []int{}
-			now := m.timer.Now()
-
-			q.mu.Lock()
-			currentMemberIDs := make([]int, 0, len(q.members))
-			for id := range q.members {
-				currentMemberIDs = append(currentMemberIDs, id)
-			}
-			q.mu.Unlock()
-
-			for _, id := range currentMemberIDs {
-				if id == m.ID {
-					continue
-				}
-				last, exists := m.lastSeen[id]
-
-				q.mu.Lock()
-				isRemoved := q.removed[id]
-				q.mu.Unlock()
-
-				if !isRemoved && (!exists || now.Sub(last) > HeartbeatTimeout) {
-					suspects = append(suspects, id)
-				}
-			}
-			m.mu.Unlock()
-
-			for _, id := range suspects {
-				logrus.Infof("Member %d: Suspecting member %d (no heartbeat for %v)", m.ID, id, now.Sub(m.lastSeen[id]))
-
-				if strategy, ok := m.Election.(*MajorityVoteStrategy); ok {
-					strategy.voteMutex.Lock()
-					if _, exists := strategy.votes[id]; !exists {
-						strategy.votes[id] = make(map[int]bool)
-					}
-					// Add this member's (m.ID) vote for the suspected member (id)
-					strategy.votes[id][m.ID] = true
-					logrus.Debugf("Member %d: Added own implicit vote for suspect %d. Current votes: %v", m.ID, id, strategy.votes[id])
-					strategy.voteMutex.Unlock()
-
-					// *** EDGE CASE: 2-MEMBER QUORUM FAILURE HANDLING (WALKAROUND SOLUTION FOR DEMO) ***
-					//
-					// Context: In a 2-member quorum, achieving a majority (2 votes) for member removal
-					// becomes impossible if one member fails or is partitioned. The standard voting process
-					// would lead to a prolonged period before cleanupExpiredVotes terminates the quorum.
-					//
-					// This walkaround provides a faster detection and termination for the demo.
-					// If a member is suspected and the quorum size is 2, it directly initiates a
-					// ProposeMemberRemoval after VoteDecisionTimeout.
-					//
-					// RISK ACKNOWLEDGEMENT:
-					// In a real-time network with network partitions, this local decision by the
-					// *single remaining active observer* (i.e., the node that *thinks* the other is unresponsive)
-					// can still lead to a form of split-brain in terms of independent decision-making.
-					// Both nodes, if partitioned, might independently conclude the other has failed and
-					// then terminate their respective quorums.
-					//
-					// This behavior is ACCEPTABLE for a 2-member fail-stop design (preferring halt over inconsistency)
-					// but it deviates from a strict multi-node consensus for removal.
-					//
-					// FUTURE PLAN: A more robust solution for production would typically involve:
-					// 1. A dedicated witness/arbiter service for 2-node clusters to break ties, or
-					// 2. A more sophisticated voting strategy that fully encapsulates timeout and
-					//    forced removal logic without local member-level shortcuts.
-					// All other member removals and quorum terminations are handled centrally
-					// by Quorum.ProposeMemberRemoval and MajorityVoteStrategy.cleanupExpiredVotes.
-					q.mu.Lock()
-					currentQuorumSize := len(q.members) // Get the current number of members in the quorum
-					removedMembers := q.removed
-					q.mu.Unlock()
-
-					if !removedMembers[id] && currentQuorumSize <= 2 && now.Sub(m.lastSeen[id]) > VoteDecisionTimeout {
-						// simple arrangement for timeout suspecting event
-						logrus.Warnf("Quorum unrecoverable: Leader %d failed and remaining 1-member cannot form majority. Ending quorum.", id)
-						q.ProposeMemberRemoval(id)
-
-						continue
-					}
-				}
-
-				voteReq := Message{From: m.ID, Type: RequestVote, Payload: id}
-				m.networker.Send(voteReq)
-			}
-		case <-m.ctx.Done():
-			logrus.Debugf("Member %d: Heartbeat monitor stopped.", m.ID)
-			return
-		}
-	}
-}
-
-func (m *Member) handleMessage(msg Message, q *Quorum) {
-	logrus.Debugf("Member %d: Received message from %d, Type: %v, Payload: %v", m.ID, msg.From, msg.Type, msg.Payload)
-	switch msg.Type {
-	case Heartbeat:
-		m.mu.Lock()
-		m.lastSeen[msg.From] = m.timer.Now()
-		m.mu.Unlock()
-	case RequestVote:
-		targetID := msg.Payload.(int)
-		m.Election.HandleRequestVote(msg.From, targetID, m, q, m.networker)
-	case Vote:
-		targetID := msg.Payload.(int)
-		m.Election.HandleVote(msg.From, targetID, m, q, m.networker)
-	}
+// Status returns a copy of the node's state; safe to call from any goroutine.
+func (m *Member) Status() raft.Status {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.node.Status()
 }
 
 func (m *Member) Stop() {
-	m.Alive = false
 	m.cancel()
 	logrus.Infof("Member %d: Stopped.", m.ID)
+}
+
+func (m *Member) IsAlive() bool {
+	return m.ctx.Err() == nil
 }

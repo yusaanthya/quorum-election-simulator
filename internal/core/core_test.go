@@ -3,9 +3,16 @@ package core
 import (
 	"testing"
 	"time"
+
+	"github.com/Anthya1104/quorum-election-cli/internal/core/raft"
 )
 
-func TestNewQuorumInitialization(t *testing.T) {
+// electionWaitTicks bounds how many 100ms mock-time ticks a test waits for a leader.
+// Members whose timeouts land in the same tick split the vote and retry after another
+// randomized timeout (up to 3s), so the window covers several rounds.
+const electionWaitTicks = 100
+
+func TestRaftInitialization(t *testing.T) {
 	mockTimer := NewMockTimer(time.Now())
 	mockNotifier := NewMockNotifier()
 
@@ -21,124 +28,203 @@ func TestNewQuorumInitialization(t *testing.T) {
 		if !ok {
 			t.Errorf("Expected member %d to exist, but not found", i)
 		}
-		if m.ID != i {
-			t.Errorf("Member ID mismatch: expected %d, got %d", i, m.ID)
+		if m.Status().Role != raft.Follower {
+			t.Errorf("Member %d should start as Follower, got %v", i, m.Status().Role)
 		}
-		if !m.Alive {
-			t.Errorf("Expected member %d to be alive initially", i)
-		}
-		for j := 0; j < 3; j++ {
-			if i == j {
-				continue
-			}
-			lastSeenTime, exists := m.lastSeen[j]
-			if !exists {
-				t.Errorf("Member %d's lastSeen for member %d should exist", i, j)
-			}
-			if lastSeenTime != mockTimer.Now() {
-				t.Errorf("Member %d's lastSeen for member %d expected to be %v, got %v", i, j, mockTimer.Now(), lastSeenTime)
-			}
+		if m.Status().Term != 0 {
+			t.Errorf("Member %d should start with Term 0, got %d", i, m.Status().Term)
 		}
 	}
-
-	if q.LeaderID != -1 {
-		t.Errorf("Expected LeaderID to be -1 (not elected yet), got %d", q.LeaderID)
-	}
-
-	if q.strategy == nil {
-		t.Errorf("Expected election strategy to be initialized, got nil")
-	}
-
-	q.Stop()
 }
 
-func TestKillMember(t *testing.T) {
-
+func TestLeaderElection(t *testing.T) {
 	mockTimer := NewMockTimer(time.Now())
 	mockNotifier := NewMockNotifier()
 	q := NewQuorum(3, mockTimer, mockNotifier)
-	q.networker = NewTestNetworkRouter(q)
+
 	q.Start()
+	defer q.Stop()
 
-	// make sure the lastSeen updated
-	mockTimer.AdvanceTime(HeartbeatInterval)
+	// Wait for members to start and register timers
+	time.Sleep(50 * time.Millisecond)
 
-	// leave enough time for go scheduler
-	time.Sleep(500 * time.Millisecond)
+	// Advance time gradually to allow randomized timeouts to trigger naturally
+	// Tick every 100ms, up to electionWaitTicks
+	for i := 0; i < electionWaitTicks; i++ {
+		mockTimer.AdvanceTime(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond) // Allow goroutines to run
 
-	memberToKillID := 1
+		// Check for leader
+		leaderCount := 0
+		for _, m := range q.members {
+			if m.Status().Role == raft.Leader {
+				leaderCount++
+			}
+		}
 
-	q.KillMember(memberToKillID) // Member 1 stop heartbeat
-
-	m, ok := q.members[memberToKillID]
-	if !ok {
-		t.Fatalf("Expected member %d to exist in quorum, but not found after kill", memberToKillID)
-	}
-	if m.Alive {
-		t.Errorf("Expected member %d to be marked as not alive after kill", memberToKillID)
-	}
-
-	// make sure the heartbeat monitoring would be trigger
-	mockTimer.AdvanceTime(HeartbeatTimeout * 2)
-
-	// make sure member 0 and member 2 would not trigger dead suspectinng
-	if m0, ok := q.members[0]; ok {
-		m0.mu.Lock()
-		m0.lastSeen[2] = mockTimer.Now()
-		m0.mu.Unlock()
-	}
-	if m2, ok := q.members[2]; ok {
-		m2.mu.Lock()
-		m2.lastSeen[0] = mockTimer.Now()
-		m2.mu.Unlock()
+		if leaderCount == 1 {
+			break
+		}
 	}
 
-	removedID := waitForChannelReceive(t, mockNotifier.memberRemovedCh, 5*time.Second, "Expected member removed notification")
-	if removedID != memberToKillID {
-		t.Errorf("Expected member %d to be removed, got %d", memberToKillID, removedID)
+	// Check if a leader is elected
+	leaderCount := 0
+	for _, m := range q.members {
+		if m.Status().Role == raft.Leader {
+			leaderCount++
+		}
 	}
 
-	q.mu.Lock()
-	_, existsInMembers := q.members[memberToKillID]
-	isRemovedInMap := q.removed[memberToKillID]
-	q.mu.Unlock()
-
-	if existsInMembers {
-		t.Errorf("Member %d should be removed from q.members map", memberToKillID)
-	}
-	if !isRemovedInMap {
-		t.Errorf("Member %d should be marked as removed in q.removed map", memberToKillID)
+	if leaderCount != 1 {
+		t.Errorf("Expected exactly 1 leader, got %d", leaderCount)
 	}
 
-	if len(q.getAliveMemberIDs()) > 1 {
-		assertChannelEmpty(t, mockNotifier.quorumEndedCh, 100*time.Millisecond, "Did not expect quorum ended notification")
+	leaderID := waitForChannelReceive(t, mockNotifier.leaderElectedCh, time.Second, "Leader election notification")
+	if q.members[leaderID].Status().Role != raft.Leader {
+		t.Errorf("Notifier reported member %d as leader, but it is %v", leaderID, q.members[leaderID].Status().Role)
 	}
-
-	q.Stop()
 }
 
-func TestMajorityVoteStrategy_HandleVote_NoMajority(t *testing.T) {
+func TestFailoverReElection(t *testing.T) {
 	mockTimer := NewMockTimer(time.Now())
 	mockNotifier := NewMockNotifier()
-	q := NewQuorum(4, mockTimer, mockNotifier)
-	q.networker = NewTestNetworkRouter(q)
+	q := NewQuorum(3, mockTimer, mockNotifier)
+
+	q.Start()
 	defer q.Stop()
+
+	// Wait for members to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Initial election
+	for i := 0; i < electionWaitTicks; i++ {
+		mockTimer.AdvanceTime(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+		leaderCount := 0
+		for _, m := range q.members {
+			if m.Status().Role == raft.Leader {
+				leaderCount++
+			}
+		}
+		if leaderCount == 1 {
+			break
+		}
+	}
+
+	var oldLeaderID int = -1
+	for _, m := range q.members {
+		if m.Status().Role == raft.Leader {
+			oldLeaderID = m.ID
+		}
+	}
+
+	if oldLeaderID == -1 {
+		t.Fatalf("Failed to elect initial leader")
+	}
+
+	// Kill the leader
+	q.KillMember(oldLeaderID)
+
+	// Advance time for others to timeout (heartbeat timeout ~0.5s, election timeout 1.5s+)
+	// Wait enough for election timeout
+	for i := 0; i < electionWaitTicks; i++ {
+		mockTimer.AdvanceTime(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+
+		leaderCount := 0
+		for _, m := range q.members {
+			if m.ID == oldLeaderID {
+				continue
+			}
+			if m.Status().Role == raft.Leader {
+				leaderCount++
+			}
+		}
+		if leaderCount == 1 {
+			break
+		}
+	}
+
+	leaderCount := 0
+	var newLeaderID int = -1
+	for _, m := range q.members {
+		if m.ID == oldLeaderID {
+			continue
+		}
+		if m.Status().Role == raft.Leader {
+			leaderCount++
+			newLeaderID = m.ID
+		}
+	}
+
+	if leaderCount != 1 {
+		t.Errorf("Expected 1 new leader after failover, got %d", leaderCount)
+	}
+
+	if newLeaderID == oldLeaderID {
+		t.Errorf("New leader should be different from old leader")
+	}
+}
+
+func TestQuorumLossTermination(t *testing.T) {
+	mockTimer := NewMockTimer(time.Now())
+	mockNotifier := NewMockNotifier()
+	q := NewQuorum(3, mockTimer, mockNotifier)
 	q.Start()
 
-	strategy0 := q.members[0].Election.(*MajorityVoteStrategy)
+	// Wait for leader election
+	time.Sleep(50 * time.Millisecond)
+	leaderFound := false
+	for i := 0; i < electionWaitTicks; i++ {
+		mockTimer.AdvanceTime(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 
-	strategy0.voteMutex.Lock()
-	strategy0.voteTimestamps[1] = mockTimer.Now()
-	strategy0.votes[1] = make(map[int]bool)
-	strategy0.votes[1][0] = true
-	strategy0.voteMutex.Unlock()
+		leaderCount := 0
+		for _, m := range q.members {
+			if m.Status().Role == raft.Leader {
+				leaderCount++
+			}
+		}
+		if leaderCount == 1 {
+			leaderFound = true
+			break
+		}
+	}
 
-	voteMsgFrom2 := Message{From: 2, To: 0, Type: Vote, Payload: 1}
-	q.members[0].handleMessage(voteMsgFrom2, q)
+	if !leaderFound {
+		t.Fatal("Failed to elect initial leader")
+	}
 
-	assertChannelEmpty(t, mockNotifier.memberRemovedCh, 100*time.Millisecond, "Did not expect member removed notification (no majority)")
+	// Kill 2 nodes (majority loss)
+	q.members[0].Stop()
+	q.members[1].Stop()
 
-	assertChannelEmpty(t, mockNotifier.quorumEndedCh, 100*time.Millisecond, "Did not expect quorum ended notification")
+	t.Log("Killed members 0 and 1. Surviving member: 2")
 
+	// Advance time to allow accumulation of election failures
+	startState := q.members[2].IsAlive()
+	if !startState {
+		t.Fatal("Member 2 should be alive initially")
+	}
+
+	stopped := false
+	for i := 0; i < 300; i++ { // 30s simulation
+		mockTimer.AdvanceTime(100 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
+
+		alive := q.members[2].IsAlive()
+		failures := q.members[2].Status().ElectionFailures
+
+		if !alive {
+			t.Logf("Member 2 stopped as expected. Failures: %d", failures)
+			stopped = true
+			break
+		}
+	}
+
+	if !stopped {
+		failures := q.members[2].Status().ElectionFailures
+		t.Fatalf("Member 2 did not stop after quorum loss. Current failures: %d", failures)
+	}
 	q.Stop()
 }
