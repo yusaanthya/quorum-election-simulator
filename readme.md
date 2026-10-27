@@ -133,7 +133,7 @@ sequenceDiagram
     participant N as raft.Node (domain)
     participant IO as Transport / timers / notifier
     E->>M: Message or timer event
-    M->>M: Lock state; ignore if stopped
+    M->>M: Lock state and check whether stopped
     M->>N: OnMessage / OnElectionTimeout / other event
     N->>N: Apply election rules and update state
     N-->>M: Ordered outputs (Send, ResetElectionTimer, ...)
