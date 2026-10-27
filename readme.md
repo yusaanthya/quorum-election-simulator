@@ -1,165 +1,282 @@
-# Quorum Election CLI Project
+# Quorum Election Simulator
 
-This is a CLI (Command Line Interface) application implemented in Go that simulates leader election in a distributed cluster using the leader-election part of the Raft consensus algorithm. Members elect a leader by majority vote, the leader keeps its followers with heartbeats, and a new leader is elected when the current one fails. This project aims to demonstrate Liveness and Safety in a distributed system when facing node failures.
+An interactive Go CLI for exploring **Raft leader election and failover**.
+Start a simulated cluster, stop its leader, and watch the remaining members
+hold a new election.
 
-## Table of Contents
+All members run as goroutines inside a single process and communicate through
+in-memory channels. The project separates pure election rules from runtime
+concerns so the protocol can be tested without timers or goroutines. It covers
+leader election and heartbeats; log replication and persistent storage are
+outside its scope.
 
-1. Project Introduction
-2. How to Use
-   - Prerequisites
-   - Clone the Project
-   - Run the Application
-   - CLI Commands
-   - Run Tests
-3. Dependencies and Credits
-4. System Design and Architectural Considerations
-   - Domain Layer and Runtime Layer
-   - Raft Leader Election
-   - Leader Lease (Quorum Check)
-   - Termination on Repeated Election Failure
-   - Graceful Shutdown and Concurrency
-5. Known Issues and Future Optimization Directions
-6. Core Evolution
+[Quick start](#quick-start) · [Try a failover](#try-a-failover) ·
+[Architecture](#architecture) · [Build from source](#build-from-source) ·
+[Tests](#tests) · [Limitations](#limitations) · [Further reading](#further-reading)
 
-## 1. Project Introduction
+## Quick start
 
-This project simulates a cluster of multiple members. Every member runs independently and starts as a Follower. When a follower stops hearing from a leader, it becomes a Candidate and asks the others for votes; a candidate that collects a majority (`N/2 + 1`) becomes the Leader and sends periodic heartbeats. If the leader is killed, the remaining members time out and elect a new one, as long as a majority is still alive. If no majority is left, members keep failing elections and eventually stop, which ends the simulation.
+Download and extract the ZIP from [v0.2.0](https://github.com/yusaanthya/quorum-election-simulator/releases/tag/v0.2.0).
+It includes binaries for Windows, macOS (`darwin`), and Linux, each for `amd64`
+and `arm64`. You do not need Go to run a prebuilt binary.
 
-## 2. How to Use
+Open a terminal **inside the extracted directory containing the binaries and
+`log/`**. Logs are written to the terminal and to `log/log_output.txt`, relative
+to the working directory.
 
-### 2.1 Prerequisites
+### Windows (PowerShell)
 
-- Go Language Environment (Version 1.24 or higher, as required by `go.mod`)
+Run these commands for an x64 Windows machine:
 
-### 2.2 Clone the Project
-
-```
-git clone <Your project link, if any>
+```powershell
+.\quorum_election_app_windows_amd64.exe version
+.\quorum_election_app_windows_amd64.exe play --members 5
 ```
 
-### 2.3 Run the Application
+Use the `windows_arm64.exe` binary on ARM64 Windows. Launch the executable from
+PowerShell or Command Prompt; double-clicking it displays a command-line-tool
+notice instead of starting the simulation.
 
-Build the binary
+### Linux or macOS
 
-```
-go build -o quorum_election cmd/main.go
-```
+For Linux amd64:
 
-You can run the application directly using the go run command or the binary file name, specifying the initial number of members with the --members or -m flag. The default is 3 members.
-
-- To start with the default 3 members:
-
-```
-  ./quorum_election play
+```sh
+chmod +x quorum_election_app_linux_amd64
+./quorum_election_app_linux_amd64 version
+./quorum_election_app_linux_amd64 play --members 5
 ```
 
-- To start with 5 members:
+On macOS, substitute `quorum_election_app_darwin_arm64` for Apple Silicon or
+`quorum_election_app_darwin_amd64` for Intel. For Linux ARM64, use
+`quorum_election_app_linux_arm64`. The v0.2.0 Linux amd64 binary is dynamically
+linked and requires a compatible glibc environment.
 
+The `version` command should report `0.2.0`. Omitting `--members` starts three
+members; `-m` is shorthand for `--members`.
+
+## Try a failover
+
+With five members running:
+
+1. Wait for a log entry such as `Member 2: Won election for term 1 with 3 votes`.
+   The actual leader ID and term vary between runs.
+2. Enter `kill 2` if member 2 is the current leader.
+3. Watch the remaining members elect a new leader in a higher term. Five
+   configured members require three votes, even after one member is stopped.
+4. Enter `restart` to start a fresh cluster, or `exit` to leave the application.
+
+These commands are entered **inside the running simulation**, not in your shell:
+
+| Command | Effect |
+| --- | --- |
+| `kill <member_id>` | Stops that member's event loop and timers. IDs run from `0` to `N - 1`. |
+| `restart` | Stops the current cluster and starts a fresh one with the same member count. |
+| `exit` | Stops the cluster and exits the CLI. |
+
+If too few members remain to form a majority, elections keep failing until the
+surviving members halt. Once all members stop, the CLI automatically starts a
+fresh cluster. Ending a quorum does not exit the application.
+
+## Architecture
+
+### Responsibilities and boundaries
+
+`internal/service` controls the interactive session. `internal/core` owns
+concurrency, timers, and message delivery. It depends on `internal/core/raft`,
+which holds election state and rules without importing the runtime package.
+
+```mermaid
+flowchart TB
+    subgraph process["Single Go process — simulated cluster"]
+        subgraph service["internal/service"]
+            CLI["CLI<br/>play · kill · restart · exit"]
+        end
+        subgraph runtime["internal/core — runtime"]
+            Q["Quorum<br/>Member lifecycle"]
+            M["Member × N<br/>One event-loop goroutine per member"]
+            IO["Runtime services<br/>Timers · DirectNetworker · notifications"]
+        end
+        subgraph domain["internal/core/raft — pure domain"]
+            NODE["Node per member<br/>Election state and rules"]
+            CLUSTER["Cluster<br/>Membership size and majority"]
+        end
+    end
+    CLI -->|controls| Q
+    Q -->|owns| M
+    M -->|uses| IO
+    M -->|invokes| NODE
+    NODE -->|uses| CLUSTER
 ```
- ./quorum_election play --members 5
+
+Arrows show control, ownership, or use as labeled. Each `Member` owns one
+`raft.Node`; `DirectNetworker` delivers messages to buffered inbox channels
+within the same process.
+
+| Component | Responsibility |
+| --- | --- |
+| `Quorum` | Creates members, starts and stops them, and signals when all have stopped. |
+| `Member` | Runs an event loop, synchronizes access to node state, and executes outputs. |
+| `raft.Node` | Owns role, term, votes, and election rules; returns ordered outputs without performing I/O. |
+| `raft.Cluster` | Computes the majority from the fixed membership size. |
+| `Timer`, `Networker`, `QuorumEventNotifier` | Provide boundaries for timing, message delivery, and notifications. |
+
+### From an event to its effects
+
+The domain decides what should happen; the runtime performs the effects.
+An active member processes each event under its mutex:
+
+```mermaid
+sequenceDiagram
+    participant E as Inbox / timer
+    participant M as Member (runtime)
+    participant N as raft.Node (domain)
+    participant IO as Transport / timers / notifier
+    E->>M: Message or timer event
+    M->>M: Lock state and check whether stopped
+    M->>N: OnMessage / OnElectionTimeout / other event
+    N->>N: Apply election rules and update state
+    N-->>M: Ordered outputs (Send, ResetElectionTimer, ...)
+    M->>IO: Execute requested effects in order
+    M->>M: Unlock state
 ```
 
-> You can also build the binary by using `make all` or `make build-quorum-election-<OS>-<CPU_ARCH>`, which could refer to `Makefile` in the root dir
+For example, an election timeout can produce `StartedElection`,
+`ResetElectionTimer`, and `Send` outputs. `Member` logs the transition, resets
+the timer, and sends the vote requests in the returned order. `raft.Node` itself
+has no goroutines, randomness, timers, logging, or I/O.
 
-### 2.4 CLI Commands
+This boundary lets domain tests drive elections through direct method calls.
+Runtime tests exercise message delivery, timers, and member lifecycle. Detailed
+class diagrams, role transitions, and a failover sequence are in
+[the architecture guide](docs/architecture.md).
 
-Once the application starts, you can interact with the Quorum by entering the following commands in the command line:
+### Election behavior
 
-- `kill <member_id>`: Simulates a crash of the member with the specified ID. The member stops processing messages and timers. If it was the leader, the remaining members stop receiving heartbeats, time out, and elect a new leader.
-- Example: `kill 1` (kills member with ID 1)
-- `restart`: Stops the currently running Quorum and starts a new one (with the same number of members as before).
-- `exit`: Gracefully shuts down the Quorum application.
+- **Election:** a timeout makes a follower a candidate. It increments its term,
+  votes for itself, and requests votes from peers. A majority is
+  `floor(N / 2) + 1`.
+- **Voting:** each member votes for at most one candidate per term. Duplicate
+  replies do not count twice, and stale vote replies cannot win an election.
+- **Heartbeats:** leaders send `AppendEntries` as heartbeats. A valid heartbeat
+  resets the follower's election timer; higher-term protocol messages make an
+  active node step down to follower.
+- **Quorum check:** the leader periodically counts members that acknowledged
+  heartbeats, including itself. Without a majority, it steps down.
+- **Election failure limit:** after five unsuccessful election attempts, the
+  next election timeout halts the member. Accepting a valid heartbeat or
+  becoming leader resets the failure count.
+- **Member shutdown:** context cancellation stops member event loops and their
+  timers; `Quorum.Stop()` waits for those goroutines to finish.
 
-### 2.5 Run Tests
+| Runtime timer | Interval |
+| --- | --- |
+| Election timeout | Randomized from 1,500 ms up to, but excluding, 3,000 ms |
+| Leader heartbeat | 500 ms |
+| Leader quorum check | 2,000 ms |
 
-To run all tests in the project, execute the following command from the project root directory:
+## Build from source
 
+Requires Git and **Go 1.24.1 or later**, as declared in [go.mod](go.mod).
+Run these commands from a terminal:
+
+```sh
+git clone https://github.com/yusaanthya/quorum-election-simulator.git
+cd quorum-election-simulator
+go run ./cmd/main.go version
+go run ./cmd/main.go play --members 5
 ```
+
+The repository includes `log/`; keep it in your working directory. To build a
+native executable on Linux or macOS:
+
+```sh
+go build -o quorum_election ./cmd/main.go
+./quorum_election play --members 5
+```
+
+On Windows PowerShell:
+
+```powershell
+go build -o quorum_election.exe ./cmd/main.go
+.\quorum_election.exe play --members 5
+```
+
+### Cross-platform builds with Make
+
+Use GNU Make and a Unix-like shell:
+
+```sh
+make all
+# Or build just one platform:
+make build-quorum-election-linux-amd64
+```
+
+Outputs are placed in `bin/quorum-election/`, alongside an empty `log/`
+directory. Targets support `windows`, `darwin`, and `linux` with `amd64` and
+`arm64`; Windows outputs have an `.exe` extension. For example:
+
+```sh
+cd bin/quorum-election
+./quorum_election_app_linux_amd64 play --members 5
+```
+
+From the repository root, `make clean all VERSION=0.2.0` rebuilds all platforms
+with an explicit version. Without `VERSION`, builds retain the version in
+[`internal/config/config.go`](internal/config/config.go). Plain `make` only
+creates the output directory; use `make all` to build binaries.
+
+## Tests
+
+From the repository root:
+
+```sh
 go test ./...
-```
-
-The Raft rules are unit-tested without goroutines or sleeps in `internal/core/raft`. To check for data races as well:
-
-```
 go test -race ./...
 ```
 
-Alternatively, you can run specific tests:
+- [Domain tests](internal/core/raft/node_test.go) cover majority voting,
+  duplicate and stale replies, one vote per term, heartbeats, quorum loss, and
+  the election failure limit without goroutines or sleeps.
+- [Runtime tests](internal/core/core_test.go) cover initialization, leader
+  election, failover, and termination after quorum loss using a mock timer.
+  They still use short sleeps to allow goroutines to run.
 
-```
-go test ./internal/core -run TestFailoverReElection
-```
+Run the failover test alone with:
 
-Or you can just run `Run Core Tests` via the Run and Debug tool if you're with vscode.
-
-## 3. Dependencies and Credits
-
-This project utilizes the following third-party Go modules:
-
-- `github.com/sirupsen/logrus`: A structured logging library for clear output of events and states during the simulation.
-- `github.com/spf13/cobra`: A powerful CLI application building library for handling command-line arguments and subcommands.
-  Thanks to these open-source projects for their contributions to the Go ecosystem!
-
-## 4. System Design and Architectural Considerations
-
-### 4.1 Domain Layer and Runtime Layer
-
-The core is split into two layers. The outer layer may depend on the inner one, never the reverse; being separate Go packages lets the compiler enforce this.
-
-```
-internal/service      CLI loop: play / kill / restart / exit
-      │
-internal/core         runtime layer
-  Quorum              creates members, starts/stops them, kill, notifier
-  Member              one goroutine per member: inbox, timers, transport, logging
-  DirectNetworker     non-blocking, lock-free message delivery
-      │ depends on
-internal/core/raft    domain layer (pure)
-  Node                Raft state and rules
-  Cluster             cluster size and majority
-  Message types, Role, Status, Output types
+```sh
+go test ./internal/core -run '^TestFailoverReElection$' -count=1
 ```
 
-- **`raft.Node` is a rich domain entity.** Its state (role, term, vote, leader, election failures) is unexported and changes only inside its event methods: `OnElectionTimeout`, `OnMessage`, `OnHeartbeatTick` and `OnQuorumCheck`. It has no goroutines, timers, randomness, logging or I/O. Each method returns an ordered list of outputs, such as `Send`, `ResetElectionTimer`, `StartHeartbeats`, `BecameLeader` or `Halted`.
-- **`Member` is a thin runtime shell.** It turns inbox messages and timer ticks into node events, executes the outputs (send a message, reset a timer, log, notify, stop), and picks the randomized election timeout. Other goroutines read state only through `Member.Status()`.
-- **Benefit:** The Raft rules are unit-tested as plain function calls (`internal/core/raft/node_test.go`), and the integration tests in `internal/core` cover the concurrent behavior with a mock timer.
+## Limitations
 
-Time (`Timer`), transport (`Networker`) and event notification (`QuorumEventNotifier`) are interfaces, so tests use `MockTimer` and `MockNotifier`.
+- **Election simulator:** no log replication, snapshots, or persistence of
+  terms and votes. It is not a production Raft implementation.
+- **Single-process transport:** messages use buffered channels, not a real
+  network. A full inbox drops messages; network delay and partitions are not
+  explicitly simulated.
+- **Static membership:** stopped members still count toward the original
+  majority. `restart` creates an entirely new cluster rather than recovering
+  a stopped member's state.
+- **Working-directory requirement:** a writable `log/` directory must exist
+  wherever the application is launched.
 
-Diagrams of the layers, types, event flow and role transitions are in [`docs/architecture.md`](docs/architecture.md).
+Potential extensions include simulated network faults, persistent term and vote
+storage, log replication, and dynamic membership.
 
-### 4.2 Raft Leader Election
+## Further reading
 
-- Election timeouts are randomized between 1500 ms and 3000 ms so members rarely time out together.
-- A candidate increments its term, votes for itself and sends `RequestVote` to its peers. It becomes leader once it has a majority of votes.
-- **Election Safety:** a member grants at most one vote per term, and a leader keeps the vote it cast for itself, so a term never has two leaders.
-- Any message with a higher term turns the receiver into a Follower of that term.
-- The leader sends `AppendEntries` heartbeats every 500 ms. A valid heartbeat resets the follower's election timer.
+- [Architecture guide](docs/architecture.md): layers, types, event flow, role
+  transitions, and a leader-failure example.
+- [Refactor design](docs/refactor/02-spec.md): the move from member-owned rules
+  to a pure Raft domain model.
+- [Makefile design](docs/makefile-cleanup/01-spec.md): build behavior and its
+  acceptance criteria.
 
-Log replication is out of scope; `AppendEntries` is used only as a heartbeat.
+The project evolved from heartbeat-based member removal to Raft elections,
+then separated the protocol from its runtime. The domain refactor also fixed
+same-term double voting and member-state races, connected leader-election
+notifications, and removed obsolete code.
 
-### 4.3 Leader Lease (Quorum Check)
-
-Every 2000 ms the leader checks how many members acknowledged its heartbeats during that interval, counting itself. If that is below a majority, it steps down to Follower, so a leader cut off from the majority does not keep acting as leader.
-
-### 4.4 Termination on Repeated Election Failure
-
-A member that starts more than `MaxElectionFailures` (5) consecutive elections without a leader appearing stops itself. When a majority of members is gone, the survivors cannot win an election, so they all stop. `Quorum` then notifies `NotifyQuorumEnded` and the CLI starts a new quorum.
-
-### 4.5 Graceful Shutdown and Concurrency
-
-- `context.Context` and `sync.WaitGroup` manage the lifecycle of every member goroutine, and `Quorum.Stop()` waits for all of them to exit.
-- Each member's state is touched only while its `Member` holds its mutex, so the concurrent tests pass with `go test -race`.
-- Messages go through `DirectNetworker`: one buffered inbox per member and non-blocking sends. A message to a full inbox is dropped, which Raft already tolerates.
-
-## 5. Known Issues and Future Optimization Directions
-
-- **Static membership:** majority is computed over the initial cluster size. Killed members still count, so a cluster that lost its majority stops instead of shrinking. This is intended: it prefers safety over availability.
-- **Timing-based integration tests:** the `internal/core` tests drive a mock clock but still rely on short `time.Sleep` calls to let goroutines run. The Raft rules themselves are covered deterministically in `internal/core/raft`.
-- **Possible next steps:** log replication, persistence of term and vote, dynamic membership, simulated network delay and partitions in `Networker`, and a real transport such as gRPC.
-
-## 6. Core Evolution
-
-1. **Majority-vote removal (initial version):** members monitored each other's heartbeats and voted to remove suspected members; the lowest-ID alive member was leader.
-2. **Raft leader election:** election moved to Raft (terms, `RequestVote`, `AppendEntries` heartbeats, randomized timeouts), plus the election-failure threshold and quorum auto-termination. The central mutex networker was replaced by the lock-free `DirectNetworker`.
-3. **Rich domain model:** Raft rules moved out of `Member` into the pure `raft.Node`, and `Member` became a runtime shell. This refactor also fixed a leader voting twice in its own term, fixed data races in member state, wired leader-election notifications, and removed dead code. Design notes are in [`docs/refactor/`](docs/refactor/).
+Built with [Cobra](https://github.com/spf13/cobra) for CLI commands and
+[Logrus](https://github.com/sirupsen/logrus) for logging.
