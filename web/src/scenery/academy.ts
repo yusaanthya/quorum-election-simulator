@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Sigil } from "../scene/magic";
+import { Motes, Sigil } from "../scene/magic";
 import { roundedCylinder } from "../scene/shapes";
 import { ball, matte, place, roundedBox, type Theme } from "./kit";
 import { mulberry32 } from "./random";
@@ -14,6 +14,7 @@ const BOOKS = ["#a3abcb", "#cfa7ab", "#abc4a8", "#e3d1a5", "#bba9d1", "#d9b9a0"]
 const BACK = Math.atan2(15.5, 11) + Math.PI;
 
 const sigils: Sigil[] = [];
+const motes: Motes[] = [];
 const floaters: { obj: THREE.Object3D; y: number; phase: number }[] = [];
 
 /** Concept A: a magic academy's round council hall with a rune circle and bookshelves. */
@@ -28,23 +29,32 @@ export const academy: Theme = {
     // Two-tier stone dais.
     place(scene, new THREE.Mesh(roundedCylinder(6.5, 0.6, 0.26, 96), matte(STONE)), 0, -0.62);
     place(scene, new THREE.Mesh(roundedCylinder(5.3, 0.32, 0.12, 96), matte(STONE_LIGHT)), 0, -0.16);
-    for (const r of [2.3, 3.5, 4.7]) {
+    for (const r of [2.45, 3.5, 4.7]) {
       const seam = new THREE.Mesh(new THREE.RingGeometry(r - 0.02, r + 0.02, 96), matte(SEAM));
       seam.rotation.x = -Math.PI / 2;
       place(scene, seam, 0, 0.003, 0, false);
     }
 
-    // Ornate rune circle in the middle.
-    const sigil = new Sigil(2.1, "#b7a2e8", { points: 7, seed: 3 });
-    place(scene, sigil, 0, 0.012, 0, false);
+    // Ornate rune circle of gold and silver light, straight on the pale stone.
+    const sigil = new Sigil(2.2, { scheme: "dawn", points: 6, seed: 3, glow: 1.1, ink: 1 });
+    place(scene, sigil, 0, 0.022, 0, false);
     sigils.push(sigil);
+    const dust = new Motes(2.1, 2.4, 48);
+    place(scene, dust, 0, 0.05, 0, false);
+    motes.push(dust);
 
-    // Crystal on a little plinth.
-    place(scene, new THREE.Mesh(roundedCylinder(0.32, 0.26, 0.08), matte(STONE)), 0, 0.13);
+    // A soft pool of light under the lines, then a crystal floating over the compass rose.
+    const aura = new THREE.Mesh(
+      new THREE.CircleGeometry(2.3, 64),
+      new THREE.MeshBasicMaterial({ map: auraTexture(), color: "#ffcf7e", transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }),
+    );
+    aura.rotation.x = -Math.PI / 2;
+    aura.renderOrder = 1;
+    place(scene, aura, 0, 0.018, 0, false);
     const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), matte("#cdbff2", 0.35));
     crystal.scale.y = 1.7;
-    place(scene, crystal, 0, 0.9);
-    floaters.push({ obj: crystal, y: 0.9, phase: 0 });
+    place(scene, crystal, 0, 1.1);
+    floaters.push({ obj: crystal, y: 1.1, phase: 0 });
 
     // Bookshelves curving around the back of the hall.
     const units = 7;
@@ -74,6 +84,7 @@ export const academy: Theme = {
 
   animate(t) {
     for (const s of sigils) s.spin(t);
+    for (const m of motes) m.update(t);
     for (const f of floaters) {
       f.obj.position.y = f.y + Math.sin(t * 1.2 + f.phase) * 0.08;
       if (f.phase === 0) f.obj.rotation.y = t * 0.6;
@@ -111,4 +122,20 @@ function bookshelf(rand: () => number) {
     }
   }
   return g;
+}
+
+function auraTexture() {
+  const c = document.createElement("canvas");
+  c.width = c.height = 256;
+  const ctx = c.getContext("2d")!;
+  const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  g.addColorStop(0, "rgba(255,255,255,0.9)");
+  g.addColorStop(0.35, "rgba(255,255,255,0.35)");
+  g.addColorStop(0.8, "rgba(255,255,255,0.15)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }

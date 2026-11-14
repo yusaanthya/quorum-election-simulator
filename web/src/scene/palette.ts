@@ -25,8 +25,6 @@ export const palette = {
   timerLow: "#e0a08c",
   timerTrack: "#ffffff",
   candidateGlow: "#f3dfa6",
-  candidateSigil: "#b9a6ea",
-  leaderSigil: "#e2c27e",
 
   envelope: "#f6efe2",
   seal: "#d98e98",

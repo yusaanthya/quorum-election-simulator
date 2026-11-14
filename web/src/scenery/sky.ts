@@ -39,7 +39,7 @@ export const sky: Theme = {
     const outer = new THREE.Mesh(new THREE.RingGeometry(2.97, 3.0, 96), matte(EMBLEM));
     outer.rotation.x = -Math.PI / 2;
     place(scene, outer, 0, 0.013, 0, false);
-    const sigil = new Sigil(2.1, "#8fb7c0", { points: 8, seed: 21 });
+    const sigil = new Sigil(2.1, { scheme: "moon", points: 8, seed: 5, ink: 0.6 });
     place(scene, sigil, 0, 0.014, 0, false);
     sigils.push(sigil);
 

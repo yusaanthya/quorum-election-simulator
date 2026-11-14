@@ -36,6 +36,11 @@ if (theme === lineup && params.get("focus") === "leader") {
   stage.controls.target.set(0, 0.6, 0);
   stage.controls.minDistance = 3;
   stage.controls.update();
+} else if (params.get("focus") === "center") {
+  stage.camera.position.set(3.2, 5.2, 4.6);
+  stage.controls.target.set(0, 0, 0);
+  stage.controls.minDistance = 2;
+  stage.controls.update();
 } else {
   stage.camera.position.multiplyScalar(0.84);
 }

@@ -32,7 +32,7 @@ export const forest: Theme = {
     place(scene, new THREE.Mesh(roundedCylinder(6.05, 0.26, 0.13, 96), matte(MOSS)), 0, -0.13);
     const clearing = new THREE.Mesh(roundedCylinder(2.2, 0.04, 0.02, 64), matte(CLEARING));
     place(scene, clearing, 0, 0.0);
-    const ring = new Sigil(2.05, "#e9d49a", { points: 6, seed: 12 });
+    const ring = new Sigil(2.05, { scheme: "sun", points: 6, seed: 2, ink: 0.6 });
     place(scene, ring, 0, 0.03, 0, false);
     sigils.push(ring);
 

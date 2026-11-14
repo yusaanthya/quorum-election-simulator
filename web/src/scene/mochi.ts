@@ -236,8 +236,8 @@ export class Mochi {
       ring.position.y = y;
       this.root.add(ring);
     }
-    this.campaignSigil = new Sigil(0.95, palette.candidateSigil, { simple: true, points: 5, seed: 9 });
-    this.leaderSigil = new Sigil(1.05, palette.leaderSigil, { simple: true, points: 8, seed: 4 });
+    this.campaignSigil = new Sigil(0.95, { scheme: "moon", simple: true, points: 5, seed: 1, ink: 0.55 });
+    this.leaderSigil = new Sigil(1.05, { scheme: "sun", simple: true, points: 6, seed: 0, ink: 0.5 });
     for (const s of [this.campaignSigil, this.leaderSigil]) {
       s.position.y = 0.05;
       s.opacity = 0;
@@ -271,7 +271,7 @@ export class Mochi {
     this.timerMat.dispose();
     this.trackMat.dispose();
     this.timerRing.geometry.dispose();
-    for (const s of [this.campaignSigil, this.leaderSigil]) s.materials.forEach((m) => m.dispose());
+    for (const s of [this.campaignSigil, this.leaderSigil]) s.dispose();
   }
 
   update(dt: number, t: number, m: MemberState, now: number, camera: THREE.Vector3) {
