@@ -4,11 +4,11 @@ import "./style.css";
 import * as THREE from "three";
 import { Mochi } from "./scene/mochi";
 import { PacketSystem } from "./scene/packets";
-import { palette } from "./scene/palette";
 import { Sparkles } from "./scene/sparkles";
 import { Stage } from "./scene/stage";
-import { buildDeckIsland, DECK_RADIUS } from "./scenery/deck";
-import type { SimEvent } from "./sim/events";
+import { academy } from "./scenery/academy";
+import { standAt, type Theme } from "./scenery/kit";
+import type { Role, SimEvent } from "./sim/events";
 import { ServerSource, WasmSource, type SimSource } from "./sim/source";
 import { ClusterState } from "./sim/state";
 import { Hud } from "./ui/hud";
@@ -22,15 +22,18 @@ const source: SimSource = wasmMode
 
 // Ambient occlusion is the costliest pass; skip it on small screens or with ?ao=0.
 const ambientOcclusion = params.get("ao") !== "0" && window.innerWidth >= 640;
+const theme: Theme = academy;
 const stage = new Stage(document.getElementById("scene")!, {
   ambientOcclusion,
-  scenery: buildDeckIsland,
-  background: palette.background,
+  scenery: (scene) => theme.build(scene),
+  background: theme.background,
 });
 const state = new ClusterState();
-const packets = new PacketSystem(stage.scene);
+const packets = new PacketSystem(stage.scene, theme.keepClear);
 const sparkles = new Sparkles(stage.scene);
 let beans: Mochi[] = [];
+/** The role each member last showed, so the theme hears about changes once. */
+let shownRoles: (Role | "Down" | null)[] = [];
 
 const hud = new Hud(document.getElementById("hud")!, source.label, wasmMode ? timeScale : null, {
   restart: (n) => source.restart(n),
@@ -51,13 +54,13 @@ function rebuild(n: number) {
   packets.clear();
   beans = Array.from({ length: n }, (_, id) => {
     const bean = new Mochi(id);
-    // Member 0 stands nearest the camera, the rest go around the rug.
-    const radius = n === 1 ? 0 : Math.min(DECK_RADIUS - 0.9, 2.2 + n * 0.28);
-    const a = (id / n) * Math.PI * 2;
-    bean.root.position.set(Math.sin(a) * radius, 0, Math.cos(a) * radius);
+    theme.dress?.(bean);
+    const [x, z] = standAt(theme, id, n);
+    bean.root.position.set(x, 0, z);
     stage.scene.add(bean.root);
     return bean;
   });
+  shownRoles = beans.map(() => null);
 }
 
 function onEvent(e: SimEvent) {
@@ -145,9 +148,16 @@ function renderLoop(time?: number) {
   const t = timer.getElapsed();
   const now = performance.now();
   stage.update();
+  theme.animate?.(t, dt);
   beans.forEach((b, i) => {
     const m = state.members[i];
-    if (m) b.update(dt, t, m, now, stage.camera.position);
+    if (!m) return;
+    const role = m.alive ? m.role : "Down";
+    if (role !== shownRoles[i]) {
+      shownRoles[i] = role;
+      theme.onRole?.(b, role);
+    }
+    b.update(dt, t, m, now, stage.camera.position);
   });
   packets.update(dt, stage.camera);
   sparkles.update(dt);

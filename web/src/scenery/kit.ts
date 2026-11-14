@@ -8,10 +8,12 @@ export interface Theme {
   id: string;
   title: string;
   background: readonly [string, string, string];
-  /** Radius of the circle members stand on. */
+  /** Radius of the circle members stand on; the widest one if layout varies it. */
   standRadius: number;
   /** Overrides the circle with explicit positions (index, count) -> [x, z]. */
   layout?: (i: number, n: number) => [number, number];
+  /** Radius around the scene's vertical axis that messages fly around, for a centerpiece standing there. */
+  keepClear?: number;
   /** Builds the scenery; returns its outer radius. Called once. */
   build(scene: THREE.Scene): number;
   /** Adds theme headwear to a member; called once per member. */
@@ -20,6 +22,13 @@ export interface Theme {
   animate?(t: number, dt: number): void;
   /** Lets accessories react to a member's role. */
   onRole?(m: Mochi, role: Role | "Down"): void;
+}
+
+/** Where member i of n stands, as [x, z]: the theme's own layout, or evenly around its circle. */
+export function standAt(theme: Theme, i: number, n: number): [number, number] {
+  if (theme.layout) return theme.layout(i, n);
+  const a = (i / n) * Math.PI * 2 + 0.35;
+  return [Math.sin(a) * theme.standRadius, Math.cos(a) * theme.standRadius];
 }
 
 const mats = new Map<string, THREE.MeshStandardMaterial>();

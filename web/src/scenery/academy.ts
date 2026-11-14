@@ -12,6 +12,15 @@ const BOOKS = ["#a3abcb", "#cfa7ab", "#abc4a8", "#e3d1a5", "#bba9d1", "#d9b9a0"]
 
 // Camera looks from +x/+z, so "behind the circle" is the opposite direction.
 const BACK = Math.atan2(15.5, 11) + Math.PI;
+/** The same camera direction as an angle from +z toward +x, the way members are placed. */
+const FRONT = Math.atan2(11, 15.5);
+
+// Members stand on the upper dais (flat to radius 5.18) between the rune circle (2.3) and the
+// bookshelves (5.45), each with a floor sigil of radius 1.05. The ring widens with the cluster
+// so nine members keep 0.7 between their sigils, and stays clear of the rune circle for one.
+const STAND_MIN = 3.5;
+const STAND_MAX = 4.1;
+const standRadius = (n: number) => Math.min(STAND_MAX, STAND_MIN + Math.max(0, n - 3) * 0.1);
 
 const sigils: Sigil[] = [];
 const motes: Motes[] = [];
@@ -22,7 +31,17 @@ export const academy: Theme = {
   id: "academy",
   title: "A · 魔法學院的星詠圓桌",
   background: ["#ece7f3", "#cec5df", "#a69bc2"],
-  standRadius: 3.9,
+  standRadius: STAND_MAX,
+  // An odd cluster puts member 0 nearest the camera. An even one turns half a step, so it is
+  // symmetric too, two members stand left and right rather than front and back, and nobody
+  // stands straight behind the crystal.
+  layout(i, n) {
+    const r = standRadius(n);
+    const a = FRONT + ((i + (n % 2 === 0 ? 0.5 : 0)) / n) * Math.PI * 2;
+    return [Math.sin(a) * r, Math.cos(a) * r];
+  },
+  // Members facing each other across the circle would send messages straight through the crystal.
+  keepClear: 0.6,
 
   build(scene) {
     const rand = mulberry32(11);

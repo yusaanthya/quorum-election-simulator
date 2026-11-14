@@ -80,13 +80,16 @@ fresh cluster. Ending a quorum does not exit the application.
 
 ## 3D visualizer
 
-`serve` opens the same simulation in the browser as a three.js scene. Each
-member is a jelly bean. Candidates hop with a star overhead, the leader wears a
-crown, and stopped members fall over. Messages fly between beans: stars are
-vote requests, hearts are granted votes, grey dots are refusals, and mint
-bubbles are heartbeats. The ring under each follower counts down its election
-timeout. Click a bean to stop it, or use the buttons to stop the leader or
-restart with 3, 5, or 7 members.
+`serve` opens the same simulation in the browser as a three.js scene: a small
+magic academy hall where each member is a round cat standing around a rune
+circle. Candidates hop on a silver circle, the leader wears a crown and stands
+on a gold one, and stopped members close their eyes and slump. Messages fly
+between members: letters are vote requests, hearts are granted votes, grey
+pebbles are refusals, and mint dots are heartbeats. The ring under each
+follower counts down its election timeout. Click a member to stop it, or use
+the buttons to stop the leader or restart with 3, 5, or 7 members.
+
+![The visualizer after a re-election](docs/visualizer-preview.png)
 
 ```sh
 make web        # build the front end once (Node.js 20+)

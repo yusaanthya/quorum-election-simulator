@@ -849,3 +849,10 @@ h2 {
 .roster:empty {
   display: none;
 }
+
+/* Phones: name tags shrink to the numbered badge so they don't cover the small scene. */
+@media (max-width: 640px) {
+  .member-label .member-role {
+    display: none;
+  }
+}

@@ -9,7 +9,7 @@ import type { MemberState } from "./sim/state";
 import { academy } from "./scenery/academy";
 import { forest } from "./scenery/forest";
 import { lineup } from "./scenery/lineup";
-import type { Theme } from "./scenery/kit";
+import { standAt, type Theme } from "./scenery/kit";
 import { sky } from "./scenery/sky";
 
 const params = new URLSearchParams(location.search);
@@ -44,7 +44,7 @@ if (theme === lineup && params.get("focus") === "leader") {
 } else {
   stage.camera.position.multiplyScalar(0.84);
 }
-const packets = new PacketSystem(stage.scene);
+const packets = new PacketSystem(stage.scene, theme.keepClear);
 
 // A frozen moment: member 0 leads, member 2 campaigns, member 4 has stopped.
 const roles: (Role | "Down")[] =
@@ -67,13 +67,8 @@ const mochis = members.map((m, i) => {
   const mochi = new Mochi(m.id);
   theme.dress?.(mochi);
   theme.onRole?.(mochi, roles[i]);
-  if (theme.layout) {
-    const [x, z] = theme.layout(i, members.length);
-    mochi.root.position.set(x, 0, z);
-  } else {
-    const a = (i / members.length) * Math.PI * 2 + 0.35;
-    mochi.root.position.set(Math.sin(a) * theme.standRadius, 0, Math.cos(a) * theme.standRadius);
-  }
+  const [x, z] = standAt(theme, i, members.length);
+  mochi.root.position.set(x, 0, z);
   stage.scene.add(mochi.root);
   return mochi;
 });

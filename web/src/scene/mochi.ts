@@ -16,6 +16,9 @@ const ROLE_LABEL: Record<string, string> = { Follower: "追隨者", Candidate: "
 const DOME_TOP = 1.1;
 /** Height of the head between the ears; the crown sits here. */
 export const BODY_H = DOME_TOP;
+/** Height of the name tag over the head: just clear of the ears, or of the leader's lamp. */
+const LABEL_LIFT = 0.55;
+const LABEL_LIFT_LEADER = 0.85;
 const EYE_Y = 0.71;
 const EYE_X = 0.115;
 
@@ -175,6 +178,7 @@ export class Mochi {
   private readonly campaignSigil: Sigil;
   private readonly leaderSigil: Sigil;
   private readonly label: HTMLDivElement;
+  private readonly labelObj: CSS2DObject;
   private labelKey = "";
 
   private readonly phase = Math.random() * Math.PI * 2;
@@ -246,9 +250,9 @@ export class Mochi {
 
     this.label = document.createElement("div");
     this.label.className = "member-label";
-    const labelObj = new CSS2DObject(this.label);
-    labelObj.position.y = BODY_H + 0.85;
-    this.root.add(labelObj);
+    this.labelObj = new CSS2DObject(this.label);
+    this.labelObj.position.y = BODY_H + LABEL_LIFT;
+    this.root.add(this.labelObj);
   }
 
   /** World position where messages leave and land. */
@@ -320,6 +324,8 @@ export class Mochi {
     this.lamp.visible = this.lampLevel > 0.01;
     this.lamp.position.y = BODY_H + 0.55 + Math.sin(t * 1.6) * 0.04;
     this.light.intensity = this.lampLevel * 2;
+    // The name tag stays close to the ears, and rises above the lamp while leading.
+    this.labelObj.position.y = BODY_H + LABEL_LIFT + this.lampLevel * (LABEL_LIFT_LEADER - LABEL_LIFT);
 
     this.campaign = damp(this.campaign, alive && m.role === "Candidate" ? 1 : 0, 6, dt);
     this.campaignSigil.opacity = this.campaign * (0.75 + Math.sin(t * 3) * 0.15);
@@ -347,7 +353,7 @@ export class Mochi {
   }
 
   private updateLabel(m: MemberState) {
-    const status = !m.alive ? (m.halted ? "累倒了" : "休息中") : ROLE_LABEL[m.role];
+    const status = !m.alive ? "停止" : ROLE_LABEL[m.role];
     const key = `${status}|${m.term}`;
     if (key === this.labelKey) return;
     this.labelKey = key;
