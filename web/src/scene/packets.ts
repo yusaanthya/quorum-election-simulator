@@ -1,19 +1,18 @@
 import * as THREE from "three";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import type { MessageKind } from "../sim/events";
 import { palette } from "./palette";
-import { heartGeometry, starGeometry } from "./shapes";
+import { heartGeometry } from "./shapes";
 
 interface Style {
-  geometry: THREE.BufferGeometry;
-  material: THREE.Material;
-  size: number;
+  make: () => THREE.Object3D;
   duration: number; // Seconds in flight when the simulation reports no delay
   arc: number; // Arc height per unit of distance
-  spin: number;
+  faceCamera: boolean;
 }
 
 interface Packet {
-  mesh: THREE.Mesh;
+  obj: THREE.Object3D;
   from: THREE.Vector3;
   to: THREE.Vector3;
   age: number;
@@ -22,31 +21,53 @@ interface Packet {
   onArrive?: () => void;
 }
 
-const sphere = new THREE.SphereGeometry(1, 16, 12);
-const glossy = (color: string, emissive = 0.3) =>
-  new THREE.MeshStandardMaterial({ color, roughness: 0.3, emissive: color, emissiveIntensity: emissive });
+const matte = (color: string, emissive = 0) =>
+  new THREE.MeshStandardMaterial({ color, roughness: 0.8, emissive: color, emissiveIntensity: emissive });
 
-/** Messages flying between beans: stars ask for votes, hearts grant them, mint bubbles are heartbeats. */
+/** Small messages crossing the deck: letters ask for votes, hearts grant them, pebbles refuse, dots are heartbeats. */
 export class PacketSystem {
   private readonly packets: Packet[] = [];
   private readonly styles: Record<string, Style>;
 
   constructor(private readonly scene: THREE.Scene) {
-    const star = starGeometry();
+    const envelope = new RoundedBoxGeometry(0.26, 0.18, 0.05, 2, 0.022);
+    const seal = new THREE.CircleGeometry(0.035, 16);
     const heart = heartGeometry();
+    const dot = new THREE.SphereGeometry(1, 16, 12);
+    const mats = {
+      envelope: matte(palette.envelope, 0.05),
+      seal: matte(palette.seal),
+      yes: matte(palette.voteYes, 0.08),
+      no: matte(palette.voteNo),
+      beat: matte(palette.heartbeat, 0.25),
+      reply: new THREE.MeshBasicMaterial({ color: palette.heartbeatReply, transparent: true, opacity: 0.7 }),
+    };
+    const mesh = (g: THREE.BufferGeometry, m: THREE.Material, scale: number | [number, number, number]) => () => {
+      const o = new THREE.Mesh(g, m);
+      if (Array.isArray(scale)) o.scale.set(...scale);
+      else o.scale.setScalar(scale);
+      o.castShadow = true;
+      return o;
+    };
     this.styles = {
-      request_vote: { geometry: star, material: glossy(palette.requestVote, 0.4), size: 0.2, duration: 0.75, arc: 0.28, spin: 5 },
-      vote_yes: { geometry: heart, material: glossy(palette.voteYes, 0.35), size: 0.2, duration: 0.75, arc: 0.22, spin: 0 },
-      vote_no: { geometry: sphere, material: glossy(palette.voteNo, 0.1), size: 0.1, duration: 0.75, arc: 0.18, spin: 0 },
-      heartbeat: { geometry: sphere, material: glossy(palette.heartbeat, 0.45), size: 0.11, duration: 0.55, arc: 0.12, spin: 0 },
-      heartbeat_reply: {
-        geometry: sphere,
-        material: new THREE.MeshBasicMaterial({ color: palette.heartbeatReply, transparent: true, opacity: 0.75 }),
-        size: 0.06,
-        duration: 0.5,
-        arc: 0.08,
-        spin: 0,
+      request_vote: {
+        make: () => {
+          const g = new THREE.Group();
+          const body = new THREE.Mesh(envelope, mats.envelope);
+          body.castShadow = true;
+          const s = new THREE.Mesh(seal, mats.seal);
+          s.position.z = 0.027;
+          g.add(body, s);
+          return g;
+        },
+        duration: 0.8,
+        arc: 0.22,
+        faceCamera: true,
       },
+      vote_yes: { make: mesh(heart, mats.yes, 0.13), duration: 0.8, arc: 0.2, faceCamera: true },
+      vote_no: { make: mesh(dot, mats.no, [0.07, 0.045, 0.07]), duration: 0.8, arc: 0.16, faceCamera: false },
+      heartbeat: { make: mesh(dot, mats.beat, 0.055), duration: 0.6, arc: 0.1, faceCamera: false },
+      heartbeat_reply: { make: mesh(dot, mats.reply, 0.032), duration: 0.5, arc: 0.07, faceCamera: false },
     };
   }
 
@@ -55,17 +76,17 @@ export class PacketSystem {
     const key = kind === "vote_reply" ? (granted ? "vote_yes" : "vote_no") : kind;
     const style = this.styles[key];
     if (!style) return;
-    const mesh = new THREE.Mesh(style.geometry, style.material);
-    mesh.position.copy(from);
-    mesh.scale.setScalar(0);
-    mesh.castShadow = style.size > 0.1;
-    this.scene.add(mesh);
+    const obj = style.make();
+    obj.position.copy(from);
+    obj.userData.base = obj.scale.clone();
+    obj.scale.setScalar(0);
+    this.scene.add(obj);
     const duration = durationMs > 0 ? durationMs / 1000 : style.duration;
-    this.packets.push({ mesh, from: from.clone(), to: to.clone(), age: 0, duration, style, onArrive });
+    this.packets.push({ obj, from: from.clone(), to: to.clone(), age: 0, duration, style, onArrive });
   }
 
   clear() {
-    for (const p of this.packets) this.scene.remove(p.mesh);
+    for (const p of this.packets) this.scene.remove(p.obj);
     this.packets.length = 0;
   }
 
@@ -76,20 +97,18 @@ export class PacketSystem {
       const k = Math.min(1, p.age / p.duration);
       const e = easeInOut(k);
       const dist = p.from.distanceTo(p.to);
-      p.mesh.position.lerpVectors(p.from, p.to, e);
-      p.mesh.position.y += Math.sin(Math.PI * e) * dist * p.style.arc;
+      p.obj.position.lerpVectors(p.from, p.to, e);
+      p.obj.position.y += Math.sin(Math.PI * e) * dist * p.style.arc;
 
-      // Pop in, travel, shrink into the receiver.
-      const grow = Math.min(1, k * 6) * (k > 0.85 ? 1 - (k - 0.85) / 0.15 * 0.6 : 1);
-      p.mesh.scale.setScalar(p.style.size * grow);
-      if (p.style.geometry !== sphere) {
-        // Keep stars and hearts facing the viewer so their shape reads.
-        p.mesh.lookAt(camera.position);
-        if (p.style.spin) p.mesh.rotateZ(p.age * p.style.spin);
+      const grow = Math.min(1, k * 5) * (k > 0.85 ? 1 - ((k - 0.85) / 0.15) * 0.7 : 1);
+      p.obj.scale.copy(p.obj.userData.base as THREE.Vector3).multiplyScalar(grow);
+      if (p.style.faceCamera) {
+        p.obj.lookAt(camera.position);
+        p.obj.rotateZ(Math.sin(p.age * 6) * 0.25); // A light flutter
       }
 
       if (k >= 1) {
-        this.scene.remove(p.mesh);
+        this.scene.remove(p.obj);
         this.packets.splice(i, 1);
         p.onArrive?.();
       }

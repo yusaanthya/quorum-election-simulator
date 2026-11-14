@@ -1,47 +1,82 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
-import { palette } from "./palette";
 
-export const PLATFORM_RADIUS = 7;
+export interface StageOptions {
+  ambientOcclusion: boolean;
+  /** Builds the scenery and returns its outer radius, used to fit portrait screens. */
+  scenery: (scene: THREE.Scene) => number;
+  /** Center, middle and edge colors of the background vignette. */
+  background: readonly [string, string, string];
+  /** Shift the scene right on wide screens to leave room for the HUD (default true). */
+  reserveHud?: boolean;
+}
 
-/** Renderer, camera, lights and the candy platform the beans stand on. */
+/** Renderer, camera, lights and the miniature island the members stand on. */
 export class Stage {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
   readonly renderer: THREE.WebGLRenderer;
   readonly labels: CSS2DRenderer;
   readonly controls: OrbitControls;
-  private readonly clouds: THREE.Group[] = [];
+  private readonly composer: EffectComposer | null;
+  private readonly ao: GTAOPass | null;
 
-  constructor(private readonly container: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  private readonly sceneryRadius: number;
+  private readonly reserveHud: boolean;
+
+  constructor(private readonly container: HTMLElement, opts: StageOptions) {
+    this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.VSMShadowMap;
     this.renderer.toneMapping = THREE.NeutralToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
 
     this.labels = new CSS2DRenderer();
     this.labels.domElement.className = "labels";
     container.appendChild(this.labels.domElement);
 
-    this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
-    this.camera.position.set(0, 8.5, 15);
+    this.scene.background = vignetteTexture(opts.background);
+    this.reserveHud = opts.reserveHud ?? true;
+
+    this.camera = new THREE.PerspectiveCamera(28, 1, 0.1, 200);
+    this.camera.position.set(11, 11.5, 15.5);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.target.set(0, 0.9, 0);
+    this.controls.target.set(0, 0.2, 0);
     this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.06;
     this.controls.enablePan = false;
-    this.controls.minDistance = 8;
-    this.controls.maxDistance = 28;
-    this.controls.minPolarAngle = 0.35;
-    this.controls.maxPolarAngle = 1.35;
+    this.controls.minDistance = 12;
+    this.controls.maxDistance = 34;
+    this.controls.minPolarAngle = 0.45;
+    this.controls.maxPolarAngle = 1.2;
     this.controls.update();
 
+    if (opts.ambientOcclusion) {
+      const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+      this.composer = new EffectComposer(this.renderer, target);
+      this.composer.addPass(new RenderPass(this.scene, this.camera));
+      this.ao = new GTAOPass(this.scene, this.camera, 1, 1);
+      this.ao.blendIntensity = 0.85;
+      skipOverlaysInAo(this.ao);
+      this.ao.updateGtaoMaterial({ radius: 0.55, distanceExponent: 1.4, thickness: 1.5, scale: 1.1, samples: 16 });
+      this.ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+      this.composer.addPass(this.ao);
+      this.composer.addPass(new OutputPass());
+    } else {
+      this.composer = null;
+      this.ao = null;
+    }
+
     this.addLights();
-    this.addPlatform();
-    this.addClouds();
+    this.sceneryRadius = opts.scenery(this.scene);
 
     window.addEventListener("resize", () => this.resize());
     this.resize();
@@ -51,162 +86,94 @@ export class Stage {
     const { clientWidth: w, clientHeight: h } = this.container;
     const aspect = w / h;
     this.camera.aspect = aspect;
-    this.camera.fov = 40;
 
     if (aspect < 0.9) {
-      // Portrait: back the camera off until the platform fits the width, and push the
-      // scene below the title card.
-      const halfH = Math.atan(Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * aspect);
-      const distance = (PLATFORM_RADIUS + 0.5) / Math.tan(halfH);
+      // Portrait: back off until the island fits the width, then sit it below the title card.
+      const halfW = Math.atan(Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * aspect);
+      const distance = (this.sceneryRadius + 0.6) / Math.tan(halfW);
       const dir = this.camera.position.clone().sub(this.controls.target).normalize();
       this.camera.position.copy(this.controls.target).addScaledVector(dir, distance);
-      this.controls.maxDistance = Math.max(28, distance * 1.3);
-      this.camera.setViewOffset(w, h + h * 0.14, 0, 0, w, h);
-    } else if (w > 900) {
-      // Wide: nudge the platform right of the title card without moving the orbit center.
-      this.camera.setViewOffset(w + Math.min(360, w * 0.22), h, 0, 0, w, h);
+      this.controls.maxDistance = Math.max(34, distance * 1.3);
+      this.camera.setViewOffset(w, h + h * 0.12, 0, 0, w, h);
+    } else if (w > 900 && this.reserveHud) {
+      // Wide: nudge the island right of the title card without moving the orbit center.
+      this.camera.setViewOffset(w + Math.min(320, w * 0.2), h, 0, 0, w, h);
     } else {
       this.camera.clearViewOffset();
     }
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    this.composer?.setSize(w, h);
+    this.composer?.setPixelRatio(this.renderer.getPixelRatio());
     this.labels.setSize(w, h);
   }
 
-  update(dt: number, t: number) {
+  update() {
     this.controls.update();
-    this.clouds.forEach((c, i) => {
-      c.position.y = c.userData.baseY + Math.sin(t * 0.5 + i) * 0.25;
-      c.rotation.y += dt * 0.03 * (i % 2 ? 1 : -1);
-    });
   }
 
   render() {
-    this.renderer.render(this.scene, this.camera);
+    if (this.composer) this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
     this.labels.render(this.scene, this.camera);
   }
 
   private addLights() {
-    this.scene.add(new THREE.HemisphereLight(0xfff0f7, 0xcdb8ff, 1.6));
+    this.scene.add(new THREE.HemisphereLight(0xf7f3ff, 0xb9b1c9, 1.5));
 
-    const sun = new THREE.DirectionalLight(0xffffff, 1.9);
-    sun.position.set(5, 12, 7);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.radius = 6;
-    sun.shadow.bias = -0.0005;
-    const s = sun.shadow.camera;
-    s.left = s.bottom = -10;
-    s.right = s.top = 10;
-    this.scene.add(sun);
+    const key = new THREE.DirectionalLight(0xfff2e4, 2.1);
+    key.position.set(-7, 13, 9);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.radius = 10;
+    key.shadow.blurSamples = 16;
+    key.shadow.bias = -0.0004;
+    const s = key.shadow.camera;
+    s.left = s.bottom = -8;
+    s.right = s.top = 8;
+    s.near = 1;
+    s.far = 40;
+    this.scene.add(key);
 
-    const rim = new THREE.DirectionalLight(0xffc6e5, 0.8);
-    rim.position.set(-6, 4, -8);
-    this.scene.add(rim);
-  }
-
-  private addPlatform() {
-    const top = new THREE.Mesh(
-      new THREE.CylinderGeometry(PLATFORM_RADIUS, PLATFORM_RADIUS * 1.03, 0.7, 96),
-      new THREE.MeshPhysicalMaterial({ color: palette.platformSide, roughness: 0.55, clearcoat: 0.4 }),
-    );
-    top.position.y = -0.35;
-    top.receiveShadow = true;
-    this.scene.add(top);
-
-    // A lollipop swirl painted on the top face.
-    const swirl = new THREE.Mesh(
-      new THREE.CircleGeometry(PLATFORM_RADIUS - 0.25, 96),
-      new THREE.MeshStandardMaterial({ map: swirlTexture(), roughness: 0.7 }),
-    );
-    swirl.rotation.x = -Math.PI / 2;
-    swirl.position.y = 0.005;
-    swirl.receiveShadow = true;
-    this.scene.add(swirl);
-
-    const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(PLATFORM_RADIUS - 0.05, 0.22, 16, 120),
-      new THREE.MeshPhysicalMaterial({ color: palette.platformRim, roughness: 0.35, clearcoat: 1 }),
-    );
-    rim.rotation.x = Math.PI / 2;
-    rim.castShadow = true;
-    this.scene.add(rim);
-
-    // A softer, wider tier underneath so the platform looks like a layered cake.
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(PLATFORM_RADIUS * 0.9, PLATFORM_RADIUS * 0.7, 1.2, 64),
-      new THREE.MeshPhysicalMaterial({ color: palette.platformBase, roughness: 0.6 }),
-    );
-    base.position.y = -1.3;
-    this.scene.add(base);
-  }
-
-  private addClouds() {
-    const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.92 });
-    const puff = new THREE.SphereGeometry(1, 20, 14);
-    const spots: [number, number, number, number][] = [
-      [-11, 3.5, -8, 1.1],
-      [10, 5, -10, 1.4],
-      [-14, 1, 3, 0.9],
-      [13, 2, 2, 1],
-      [2, 7, -15, 1.6],
-      [-5, -2.5, 9, 0.8],
-    ];
-    for (const [x, y, z, size] of spots) {
-      const cloud = new THREE.Group();
-      [
-        [0, 0, 0, 1],
-        [1.1, -0.2, 0.1, 0.75],
-        [-1.1, -0.25, 0, 0.7],
-        [0.4, 0.5, -0.2, 0.7],
-      ].forEach(([px, py, pz, r]) => {
-        const p = new THREE.Mesh(puff, mat);
-        p.position.set(px, py, pz);
-        p.scale.set(r, r * 0.8, r);
-        cloud.add(p);
-      });
-      cloud.position.set(x, y, z);
-      cloud.scale.setScalar(size);
-      cloud.userData.baseY = y;
-      this.clouds.push(cloud);
-      this.scene.add(cloud);
-    }
+    const fill = new THREE.DirectionalLight(0xdfe6ff, 0.45);
+    fill.position.set(9, 5, -4);
+    this.scene.add(fill);
   }
 }
 
-function swirlTexture() {
-  const size = 1024;
+function vignetteTexture(colors: readonly [string, string, string]) {
   const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = size;
+  canvas.width = canvas.height = 512;
   const ctx = canvas.getContext("2d")!;
-  const c = size / 2;
-  const wedges = 24;
-  for (let i = 0; i < wedges; i++) {
-    ctx.beginPath();
-    ctx.moveTo(c, c);
-    // Curved wedges give the pinwheel twist.
-    for (let r = 0; r <= c; r += 8) {
-      const a = ((i + r / c * 1.6) / wedges) * Math.PI * 2;
-      ctx.lineTo(c + Math.cos(a) * r, c + Math.sin(a) * r);
-    }
-    for (let r = c; r >= 0; r -= 8) {
-      const a = ((i + 1 + r / c * 1.6) / wedges) * Math.PI * 2;
-      ctx.lineTo(c + Math.cos(a) * r, c + Math.sin(a) * r);
-    }
-    ctx.closePath();
-    ctx.fillStyle = i % 2 ? palette.swirlA : palette.swirlB;
-    ctx.fill();
-  }
-  // Soft center so the beans read clearly against it.
-  const g = ctx.createRadialGradient(c, c, 0, c, c, c);
-  g.addColorStop(0, "rgba(255,255,255,0.85)");
-  g.addColorStop(0.35, "rgba(255,255,255,0.45)");
-  g.addColorStop(1, "rgba(255,255,255,0)");
+  const [center, mid, edge] = colors;
+  const g = ctx.createRadialGradient(256, 230, 20, 256, 256, 380);
+  g.addColorStop(0, center);
+  g.addColorStop(0.55, mid);
+  g.addColorStop(1, edge);
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-
+  ctx.fillRect(0, 0, 512, 512);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
   return tex;
+}
+
+/**
+ * GTAO renders every mesh into its depth and normal buffers, so flat transparent
+ * overlays (magic circles, timer rings) would cast occlusion like solid slabs. Hide
+ * them during that pass, the way GTAOPass already hides points and lines.
+ */
+function skipOverlaysInAo(pass: GTAOPass) {
+  const p = pass as unknown as { _overrideVisibility(): void; _visibilityCache: THREE.Object3D[] };
+  const base = p._overrideVisibility.bind(p);
+  p._overrideVisibility = () => {
+    base();
+    pass.scene.traverse((o) => {
+      const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
+      const overlay = o.userData.skipAO || (mat && !Array.isArray(mat) && (mat.transparent || (mat as THREE.MeshBasicMaterial).isMeshBasicMaterial));
+      if (overlay && o.visible) {
+        o.visible = false;
+        p._visibilityCache.push(o);
+      }
+    });
+  };
 }

@@ -102,7 +102,7 @@ export class Hud {
     this.sizeButtons.forEach((b) => b.classList.toggle("active", Number(b.dataset.n) === state.size));
   }
 
-  log(text: string, tone: "info" | "good" | "bad" = "info") {
+  log(text: string, tone: "info" | "vote" | "good" | "bad" = "info") {
     const li = document.createElement("li");
     li.className = tone;
     li.textContent = text;

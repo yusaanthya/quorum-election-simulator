@@ -43,55 +43,41 @@ body {
   pointer-events: none;
 }
 
-/* Name tags above each bean */
-.bean-label {
+/* Name tags above each member: quiet by default, the role carries the accent */
+.member-label {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 6px 4px 10px;
+  gap: 5px;
+  padding: 3px 8px 3px 4px;
   border-radius: 999px;
-  background: var(--card);
-  border: 2px solid var(--card-border);
-  box-shadow: 0 4px 12px rgba(186, 120, 190, 0.22);
-  font-size: 12px;
-  font-weight: 800;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 2px 8px rgba(80, 70, 100, 0.12);
+  font-size: 11px;
+  font-weight: 700;
+  color: #5d5466;
   white-space: nowrap;
-  transition: transform 0.2s ease;
 }
 
-.bean-label .bean-role {
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: #e9f9f3;
-  color: #2f9c85;
+.member-label .member-name {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #efeaf3;
+  font-size: 10px;
 }
 
-.bean-label .bean-term {
-  color: var(--ink-soft);
-  font-weight: 600;
+.member-label.candidate .member-role {
+  color: #8d77c9;
 }
 
-.bean-label.candidate .bean-role {
-  background: #fff4c4;
-  color: #b88a00;
+.member-label.leader .member-role {
+  color: #b48a3c;
 }
 
-.bean-label.leader {
-  transform: scale(1.08);
-}
-
-.bean-label.leader .bean-role {
-  background: linear-gradient(135deg, #ffe27a, #ffbf3d);
-  color: #7a4c00;
-}
-
-.bean-label.down {
-  opacity: 0.7;
-}
-
-.bean-label.down .bean-role {
-  background: #eee9f3;
-  color: #8a809a;
+.member-label.down {
+  opacity: 0.6;
 }
 
 /* HUD */
@@ -386,14 +372,8 @@ button:focus-visible {
     display: none;
   }
 
-  .bean-label {
-    gap: 4px;
-    padding: 2px 4px 2px 7px;
+  .member-label {
     font-size: 10px;
-  }
-
-  .bean-label .bean-role {
-    padding: 0 5px;
   }
 
   .feed {

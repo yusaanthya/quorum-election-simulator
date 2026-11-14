@@ -1,29 +1,38 @@
-/** Pastel candy palette shared by the 3D scene. CSS colors live in style.css. */
+/** Muted, low-saturation palette for the diorama. CSS colors live in style.css. */
 export const palette = {
-  beans: ["#ff9ec7", "#8fd3ff", "#a8eb9a", "#ffc98f", "#c4b0ff", "#fff08f", "#8feadd", "#ffaa98", "#e7a8ff"],
-  sleepy: "#cfc8da",
+  background: ["#ece8f2", "#d6d0e1", "#bdb6cc"], // center, mid, edge of the vignette
 
-  platformSide: "#ffd1e6",
-  platformRim: "#ff8fbf",
-  platformBase: "#d9ccff",
-  swirlA: "#ffe3f0",
-  swirlB: "#fff6fb",
+  // Each member is cream with its own pastel accent on the ears and bow.
+  body: "#fff7f2",
+  members: ["#f6b9cc", "#cdb9f0", "#b3dcf2", "#f7dc94", "#b8e4cc", "#f7c4ab", "#e4b8ea", "#a9dbe3", "#f2bdd8"],
+  sleepy: "#e2dde8",
+  ink: "#2f2a30",
+  blush: "#e79aa6",
 
-  crown: "#ffcf4d",
-  gem: "#ff6fa8",
-  star: "#ffe066",
+  base: "#a9c0d6",
+  baseTop: "#bcd0e2",
+  wood: ["#dcc0a0", "#d3b391", "#e2c8aa"],
+  woodEdge: "#bf9c7a",
+  rug: "#e7e0ee",
+  rugBorder: "#cfc4df",
+  grass: ["#a7c79f", "#93b98c", "#b6d1a9"],
+  stone: "#e9ebe6",
 
-  timerFull: "#7fe0b8",
-  timerLow: "#ff8a8a",
+  crown: "#ecd08c",
+  lamp: "#ffe7bf",
+
+  timerFull: "#9cc7a8",
+  timerLow: "#e0a08c",
   timerTrack: "#ffffff",
-  leaderHalo: "#ffd75e",
-  candidateHalo: "#ffe98a",
+  candidateGlow: "#f3dfa6",
+  candidateSigil: "#b9a6ea",
+  leaderSigil: "#e2c27e",
 
-  requestVote: "#ffd84d",
-  voteYes: "#ff5c9a",
-  voteNo: "#b8b0c8",
-  heartbeat: "#5fd6c0",
-  heartbeatReply: "#a6efe2",
-
-  confetti: ["#ff9ec7", "#8fd3ff", "#a8eb9a", "#ffd84d", "#c4b0ff", "#ffaa98"],
+  envelope: "#f6efe2",
+  seal: "#d98e98",
+  voteYes: "#e39aa7",
+  voteNo: "#bdb7c6",
+  heartbeat: "#9ccfc0",
+  heartbeatReply: "#c6e4da",
+  sparkle: "#f2d69a",
 } as const;
