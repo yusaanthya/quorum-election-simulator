@@ -36,7 +36,23 @@ $(foreach OS,$(OS_LIST),$(foreach ARCH,$(ARCH_LIST),$(eval $(call build_quorum_e
 all: $(PLATFORM_TARGETS)
 build-quorum-election-all: all
 
-# clean bin dir
+# 3D visualizer front end (needs Node.js 20+); run before a build to embed it in the binary
+.PHONY: web
+web:
+	cd web && npm ci && npm run build
+
+# serve the visualizer locally with the front end embedded
+.PHONY: serve
+serve: web
+	go run ./cmd/main.go serve
+
+# static site for Cloudflare Pages: the simulation runs in the browser as WebAssembly
+.PHONY: pages
+pages:
+	cd web && npm ci && npm run build:pages
+
+# clean bin dir and front-end outputs
 .PHONY: clean
 clean:
-	rm -rf $(BIN_DIR)
+	rm -rf $(BIN_DIR) web/dist-pages web/wasm-public
+	find internal/web/dist -mindepth 1 ! -name .gitkeep -exec rm -rf {} +

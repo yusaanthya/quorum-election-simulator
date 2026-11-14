@@ -1,0 +1,26 @@
+{
+  "name": "quorum-beans",
+  "private": true,
+  "version": "0.1.0",
+  "description": "3D visualizer for the quorum election simulator",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:wasm": "npm run wasm && vite --mode wasm",
+    "build": "tsc --noEmit && vite build && node scripts/keep-dist.mjs",
+    "wasm": "node scripts/build-wasm.mjs",
+    "build:pages": "npm run wasm && tsc --noEmit && vite build --mode wasm",
+    "preview:pages": "vite preview --mode wasm",
+    "deploy:pages": "npm run build:pages && npx wrangler pages deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fontsource/nunito": "^5.2.7",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.187.0",
+    "typescript": "~5.9.3",
+    "vite": "~8.3.5"
+  }
+}
