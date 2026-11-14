@@ -83,6 +83,54 @@ const surface = (() => {
   };
 })();
 
+// ---------------------------------------------------------------------------
+// Crown: one piece. A thick band with rounded edges whose upper rim swells into
+// five soft points, so it reads as a crown without any sharp corners.
+// ---------------------------------------------------------------------------
+
+const CROWN_POINTS = 5;
+const CROWN_INNER = 0.15;
+const CROWN_OUTER = 0.178;
+const CROWN_MID = (CROWN_INNER + CROWN_OUTER) / 2;
+const CROWN_RIM = 0.085; // Height of the band between the points
+const CROWN_PEAK = 0.19; // Height at the tip of each point
+
+function crownGeometry() {
+  // Closed rounded-rectangle cross-section, spun around the axis.
+  const r = 0.012;
+  const profile: THREE.Vector2[] = [];
+  const corner = (cx: number, cy: number, from: number) => {
+    for (let i = 0; i <= 5; i++) {
+      const a = from + (i / 5) * (Math.PI / 2);
+      profile.push(new THREE.Vector2(cx + Math.cos(a) * r, cy + Math.sin(a) * r));
+    }
+  };
+  corner(CROWN_OUTER - r, r, -Math.PI / 2); // Bottom outer
+  corner(CROWN_OUTER - r, CROWN_RIM - r, 0); // Top outer
+  corner(CROWN_INNER + r, CROWN_RIM - r, Math.PI / 2); // Top inner
+  corner(CROWN_INNER + r, r, Math.PI); // Bottom inner
+  profile.push(profile[0].clone());
+  const g = new THREE.LatheGeometry(profile, 160);
+
+  // Stretch the upper half of the band upward into the points.
+  const split = CROWN_RIM * 0.45;
+  const lift = (CROWN_PEAK - CROWN_RIM) / (CROWN_RIM - split);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i);
+    const y = p.getY(i);
+    const z = p.getZ(i);
+    if (y <= split) continue;
+    const a = Math.atan2(x, z);
+    const point = Math.pow(0.5 + 0.5 * Math.cos(a * CROWN_POINTS), 2.4);
+    // Points lean outward a touch, like a real crown.
+    const flare = 1 + point * ((y - split) / (CROWN_RIM - split)) * 0.08;
+    p.setXYZ(i, x * flare, split + (y - split) * (1 + lift * point), z * flare);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
 // Geometry and materials shared by every member.
 const shared = {
   eye: new THREE.SphereGeometry(1, 20, 14),
@@ -369,54 +417,6 @@ export class Mochi {
 }
 
 // ---------------------------------------------------------------------------
-// Crown: one piece. A thick band with rounded edges whose upper rim swells into
-// five soft points, so it reads as a crown without any sharp corners.
-// ---------------------------------------------------------------------------
-
-const CROWN_POINTS = 5;
-const CROWN_INNER = 0.15;
-const CROWN_OUTER = 0.178;
-const CROWN_MID = (CROWN_INNER + CROWN_OUTER) / 2;
-const CROWN_RIM = 0.085; // Height of the band between the points
-const CROWN_PEAK = 0.19; // Height at the tip of each point
-
-function crownGeometry() {
-  // Closed rounded-rectangle cross-section, spun around the axis.
-  const r = 0.012;
-  const profile: THREE.Vector2[] = [];
-  const corner = (cx: number, cy: number, from: number) => {
-    for (let i = 0; i <= 5; i++) {
-      const a = from + (i / 5) * (Math.PI / 2);
-      profile.push(new THREE.Vector2(cx + Math.cos(a) * r, cy + Math.sin(a) * r));
-    }
-  };
-  corner(CROWN_OUTER - r, r, -Math.PI / 2); // Bottom outer
-  corner(CROWN_OUTER - r, CROWN_RIM - r, 0); // Top outer
-  corner(CROWN_INNER + r, CROWN_RIM - r, Math.PI / 2); // Top inner
-  corner(CROWN_INNER + r, r, Math.PI); // Bottom inner
-  profile.push(profile[0].clone());
-  const g = new THREE.LatheGeometry(profile, 160);
-
-  // Stretch the upper half of the band upward into the points.
-  const split = CROWN_RIM * 0.45;
-  const lift = (CROWN_PEAK - CROWN_RIM) / (CROWN_RIM - split);
-  const p = g.attributes.position;
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i);
-    const y = p.getY(i);
-    const z = p.getZ(i);
-    if (y <= split) continue;
-    const a = Math.atan2(x, z);
-    const point = Math.pow(0.5 + 0.5 * Math.cos(a * CROWN_POINTS), 2.4);
-    // Points lean outward a touch, like a real crown.
-    const flare = 1 + point * ((y - split) / (CROWN_RIM - split)) * 0.08;
-    p.setXYZ(i, x * flare, split + (y - split) * (1 + lift * point), z * flare);
-  }
-  g.computeVertexNormals();
-  return g;
-}
-
-// ---------------------------------------------------------------------------
 // Coats. The texture wraps the body: x = around (front at the center), y = from
 // the top of the head (0) to the base (H).
 // ---------------------------------------------------------------------------
@@ -508,12 +508,19 @@ function blob(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, r
   ctx.fill();
 }
 
+/** A soft-edged oval patch, drawn with a gradient (canvas filters are slow). */
 function soft(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, color: string) {
+  const c = new THREE.Color().setStyle(color.replace(/rgba\(([^,]+,[^,]+,[^,]+),[^)]*\)/, "rgb($1)"));
+  const alpha = /rgba\(.*,\s*([\d.]+)\)/.exec(color)?.[1] ?? "1";
+  const rgb = `${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)}`;
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(1, ry / rx);
-  ctx.filter = `blur(${rx * 0.25}px)`;
-  ctx.fillStyle = color;
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+  g.addColorStop(0, `rgba(${rgb}, ${alpha})`);
+  g.addColorStop(0.7, `rgba(${rgb}, ${alpha})`);
+  g.addColorStop(1, `rgba(${rgb}, 0)`);
+  ctx.fillStyle = g;
   ctx.beginPath();
   ctx.arc(0, 0, rx, 0, Math.PI * 2);
   ctx.fill();

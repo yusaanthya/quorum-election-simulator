@@ -64,22 +64,29 @@ export class Sigil extends THREE.Group {
 }
 
 function texture(size: number, draw: (ctx: CanvasRenderingContext2D) => void) {
+  // Draw the crisp linework once on its own canvas...
+  const lines = document.createElement("canvas");
+  lines.width = lines.height = size;
+  const lctx = lines.getContext("2d")!;
+  // Drawing code works in a 2048-unit space centered on the origin.
+  lctx.translate(size / 2, size / 2);
+  lctx.scale(size / BIG, size / BIG);
+  lctx.strokeStyle = lctx.fillStyle = "#ffffff";
+  lctx.lineCap = lctx.lineJoin = "round";
+  draw(lctx);
+
+  // ...then blur that whole image once for the halo and lay the crisp lines on top.
+  // (A canvas filter applies per draw call, so blurring while drawing hundreds of
+  // strokes is very slow.)
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext("2d")!;
-  // Drawing code works in a 2048-unit space centered on the origin.
-  ctx.translate(size / 2, size / 2);
-  ctx.scale(size / BIG, size / BIG);
-  ctx.strokeStyle = ctx.fillStyle = "#ffffff";
-  ctx.lineCap = ctx.lineJoin = "round";
-
-  // A soft halo under the crisp linework.
-  ctx.save();
   ctx.filter = `blur(${(10 * size) / BIG}px)`;
   ctx.globalAlpha = 0.55;
-  draw(ctx);
-  ctx.restore();
-  draw(ctx);
+  ctx.drawImage(lines, 0, 0);
+  ctx.filter = "none";
+  ctx.globalAlpha = 1;
+  ctx.drawImage(lines, 0, 0);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
