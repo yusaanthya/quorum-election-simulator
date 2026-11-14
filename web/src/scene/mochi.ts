@@ -87,14 +87,16 @@ const surface = (() => {
 const shared = {
   eye: new THREE.SphereGeometry(1, 20, 14),
   line: new THREE.CapsuleGeometry(1, 1, 4, 8),
-  crownBand: new THREE.TorusGeometry(0.12, 0.017, 10, 40),
-  crownTip: new THREE.SphereGeometry(0.026, 12, 10),
+  crown: crownGeometry(),
+  pearl: new THREE.SphereGeometry(1, 16, 12),
   lamp: new THREE.SphereGeometry(0.06, 18, 14),
   ring: new THREE.RingGeometry(0.66, 0.69, TIMER_SEGMENTS, 1),
 
   ink: new THREE.MeshStandardMaterial({ color: palette.ink, roughness: 0.45 }),
   whisker: new THREE.MeshStandardMaterial({ color: "#6d6268", roughness: 0.6 }),
-  crownMat: new THREE.MeshStandardMaterial({ color: palette.crown, roughness: 0.45, metalness: 0.1 }),
+  crownMat: new THREE.MeshPhysicalMaterial({ color: palette.crown, roughness: 0.36, metalness: 0.3, clearcoat: 0.3, clearcoatRoughness: 0.4 }),
+  pearlMat: new THREE.MeshPhysicalMaterial({ color: "#fbf4e8", roughness: 0.28, sheen: 0.6, sheenColor: new THREE.Color("#ffe9f0") }),
+  gemMats: ["#e8a0ae", "#9fd3c2", "#b9a8e6"].map((c) => new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.15 })),
   lampMat: new THREE.MeshStandardMaterial({ color: palette.lamp, emissive: palette.lamp, emissiveIntensity: 1.8, roughness: 0.5 }),
 };
 
@@ -344,20 +346,74 @@ export class Mochi {
   }
 
   private buildCrown() {
-    this.crown.position.y = BODY_H - 0.03;
-    const band = new THREE.Mesh(shared.crownBand, shared.crownMat);
-    band.rotation.x = Math.PI / 2;
+    this.crown.position.y = BODY_H - 0.05;
+    const band = new THREE.Mesh(shared.crown, shared.crownMat);
     band.castShadow = true;
     this.crown.add(band);
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * Math.PI * 2;
-      const tip = new THREE.Mesh(shared.crownTip, shared.crownMat);
-      tip.position.set(Math.sin(a) * 0.12, 0.05, Math.cos(a) * 0.12);
-      this.crown.add(tip);
+    for (let i = 0; i < CROWN_POINTS; i++) {
+      const a = (i / CROWN_POINTS) * Math.PI * 2;
+      // A pearl on each point, and a gem on the band below it.
+      const pearl = new THREE.Mesh(shared.pearl, shared.pearlMat);
+      pearl.scale.setScalar(0.021);
+      pearl.position.set(Math.sin(a) * CROWN_MID, CROWN_PEAK + 0.012, Math.cos(a) * CROWN_MID);
+      this.crown.add(pearl);
+      const gem = new THREE.Mesh(shared.pearl, shared.gemMats[i % shared.gemMats.length]);
+      gem.scale.set(0.02, 0.024, 0.009);
+      gem.position.set(Math.sin(a) * (CROWN_OUTER + 0.002), 0.043, Math.cos(a) * (CROWN_OUTER + 0.002));
+      gem.rotation.y = a;
+      this.crown.add(gem);
     }
-    this.crown.rotation.x = -0.12;
+    this.crown.rotation.set(-0.1, 0, 0.08); // Worn at a slight, jaunty angle
     this.crown.scale.setScalar(0);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Crown: one piece. A thick band with rounded edges whose upper rim swells into
+// five soft points, so it reads as a crown without any sharp corners.
+// ---------------------------------------------------------------------------
+
+const CROWN_POINTS = 5;
+const CROWN_INNER = 0.15;
+const CROWN_OUTER = 0.178;
+const CROWN_MID = (CROWN_INNER + CROWN_OUTER) / 2;
+const CROWN_RIM = 0.085; // Height of the band between the points
+const CROWN_PEAK = 0.19; // Height at the tip of each point
+
+function crownGeometry() {
+  // Closed rounded-rectangle cross-section, spun around the axis.
+  const r = 0.012;
+  const profile: THREE.Vector2[] = [];
+  const corner = (cx: number, cy: number, from: number) => {
+    for (let i = 0; i <= 5; i++) {
+      const a = from + (i / 5) * (Math.PI / 2);
+      profile.push(new THREE.Vector2(cx + Math.cos(a) * r, cy + Math.sin(a) * r));
+    }
+  };
+  corner(CROWN_OUTER - r, r, -Math.PI / 2); // Bottom outer
+  corner(CROWN_OUTER - r, CROWN_RIM - r, 0); // Top outer
+  corner(CROWN_INNER + r, CROWN_RIM - r, Math.PI / 2); // Top inner
+  corner(CROWN_INNER + r, r, Math.PI); // Bottom inner
+  profile.push(profile[0].clone());
+  const g = new THREE.LatheGeometry(profile, 160);
+
+  // Stretch the upper half of the band upward into the points.
+  const split = CROWN_RIM * 0.45;
+  const lift = (CROWN_PEAK - CROWN_RIM) / (CROWN_RIM - split);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i);
+    const y = p.getY(i);
+    const z = p.getZ(i);
+    if (y <= split) continue;
+    const a = Math.atan2(x, z);
+    const point = Math.pow(0.5 + 0.5 * Math.cos(a * CROWN_POINTS), 2.4);
+    // Points lean outward a touch, like a real crown.
+    const flare = 1 + point * ((y - split) / (CROWN_RIM - split)) * 0.08;
+    p.setXYZ(i, x * flare, split + (y - split) * (1 + lift * point), z * flare);
+  }
+  g.computeVertexNormals();
+  return g;
 }
 
 // ---------------------------------------------------------------------------

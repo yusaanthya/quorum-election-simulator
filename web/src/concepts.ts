@@ -26,7 +26,12 @@ const stage = new Stage(document.getElementById("scene")!, {
   background: theme.background,
   reserveHud: false,
 });
-if (theme === lineup) {
+if (theme === lineup && params.get("focus") === "leader") {
+  stage.camera.position.set(0, 1.9, 3.4);
+  stage.controls.target.set(0, 0.95, 0);
+  stage.controls.minDistance = 1.5;
+  stage.controls.update();
+} else if (theme === lineup) {
   stage.camera.position.set(0, 2.6, 8.4);
   stage.controls.target.set(0, 0.6, 0);
   stage.controls.minDistance = 3;
