@@ -66,6 +66,23 @@ If an event was missed, use manual dispatch on main with the PR number. It reads
 fresh state; it does not use event text as an approval. Errors show in the status
 link's run log. Do not change a failed status manually to success.
 
+Review after a push: Codex reviews a pull request when it opens or is marked
+ready for review. In this repository it does not review later commits on its
+own, so after pushing to an open pull request, comment `@codex review` on it.
+Until that review completes, the status on the new head stays pending.
+
+Known limitation, accepted on 2026-11-15: `pull_request_review` and
+`pull_request_review_comment` events do not reevaluate the gate. If an inline
+finding or a review body arrives or is edited after the summary comment's last
+update, the status keeps the verdict from that update until the next summary
+update, push or manual dispatch. A finding that arrives late usually leaves
+the status at `error` ("Findings reported but severity could not be
+verified"), which a manual dispatch clears; a finding whose severity is edited
+upward after a success is not noticed. yusa-CV runs the same adapter with the
+same limitation. Closing it needs a separate unprivileged workflow that
+listens to review events and a `workflow_run` trigger here, as ibanny-cafe's
+variant has.
+
 ## Validation
 
 Run `node --test scripts/*.test.mjs`, which includes
