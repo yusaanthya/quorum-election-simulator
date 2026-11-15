@@ -16,6 +16,26 @@ export interface Theme {
   keepClear?: number;
   /** Builds the scenery; returns its outer radius. Called once. */
   build(scene: THREE.Scene): number;
+  /** Scene lighting; absent keeps the stage's default daylight. */
+  lighting?: {
+    hemi: { sky: string; ground: string; intensity: number };
+    key: { color: string; intensity: number };
+    fill: { color: string; intensity: number };
+    exposure?: number;
+  };
+  /** Bloom strength; absent means no bloom pass. */
+  bloom?: number;
+  /** How members' lamp and floor sigils are tuned for this scene; absent keeps the defaults. */
+  memberLook?: {
+    /** Lamp light height over the head (default 0.5). */
+    lampHeight: number;
+    /** Lamp light intensity at full level (default 2). */
+    lampIntensity: number;
+    /** Glow of the campaign and leader sigils. */
+    sigilGlow: number;
+    /** Multiplier of the sigils' dark underlay. */
+    sigilInk: number;
+  };
   /** Adds theme headwear to a member; called once per member. */
   dress?(m: Mochi): void;
   /** Per-frame animation of the scenery and accessories. */
