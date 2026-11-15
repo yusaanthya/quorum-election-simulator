@@ -29,14 +29,14 @@ const (
 type Config struct {
 	Members int
 	// TimeScale multiplies every timer: 3 means elections run three times slower.
-	// Values below 1 are treated as 1.
+	// Values below 1 and NaN are treated as 1, values above 1000 as 1000.
 	TimeScale float64
 }
 
 // Session keeps one quorum running and starts a fresh one when it ends or on request.
 type Session struct {
 	sink  func(core.Event)
-	timer core.Timer
+	clock *Clock // Every timer, message delivery and restart delay of the session
 	scale float64
 
 	mu      sync.Mutex
@@ -53,12 +53,15 @@ type Session struct {
 // New creates a Session. sink receives events from many goroutines and must not block.
 func New(cfg Config, sink func(core.Event)) *Session {
 	scale := cfg.TimeScale
-	if scale < 1 {
+	if !(scale >= 1) { // Also catches NaN
 		scale = 1
+	}
+	if scale > maxFactor { // The clock rejects a larger factor
+		scale = maxFactor
 	}
 	return &Session{
 		sink:    sink,
-		timer:   NewScaledTimer(core.NewRealTimer(), scale),
+		clock:   NewClock(scale),
 		scale:   scale,
 		members: clampMembers(cfg.Members),
 		restart: make(chan int, 1),
@@ -87,7 +90,7 @@ func (s *Session) run() {
 		// Once a cluster is being replaced, its shutdown events would only add noise.
 		var retired atomic.Bool
 		s.mu.Lock()
-		q := core.NewQuorumWithOptions(s.members, s.timer, core.Options{
+		q := core.NewQuorumWithOptions(s.members, s.clock, core.Options{
 			Observer: core.ObserverFunc(func(e core.Event) {
 				if !retired.Load() {
 					s.emit(e)
@@ -100,11 +103,18 @@ func (s *Session) run() {
 		q.Start()
 
 		quorumDone := q.Done()
-		var ended <-chan time.Time
+		var ended core.ITimer
+		var endedC <-chan time.Time
+		stopEnded := func() {
+			if ended != nil {
+				ended.Stop()
+			}
+		}
 	wait:
 		for {
 			select {
 			case <-s.done:
+				stopEnded()
 				retired.Store(true)
 				q.Stop()
 				return
@@ -116,26 +126,28 @@ func (s *Session) run() {
 			case <-quorumDone:
 				// Every member stopped: keep the halted cluster on screen, then start over.
 				quorumDone = nil
-				ended = time.After(time.Duration(float64(restartDelay) * s.scale))
-			case <-ended:
+				ended = s.clock.NewTimer(restartDelay)
+				endedC = ended.C()
+			case <-endedC:
 				break wait
 			}
 		}
+		stopEnded()
 		retired.Store(true)
 		q.Stop()
 	}
 }
 
-// latency picks a message delay, stretched like every other timer so that messages fly
-// slowly enough to follow.
+// latency picks a message delay in simulated time; the clock stretches it like every
+// other timer so that messages fly slowly enough to follow.
 func (s *Session) latency() time.Duration {
-	d := minLatency + time.Duration(rand.Int63n(int64(maxLatency-minLatency)))
-	return time.Duration(float64(d) * s.scale)
+	return minLatency + time.Duration(rand.Int63n(int64(maxLatency-minLatency)))
 }
 
-// emit scales timer durations to wall-clock time so a viewer can draw countdowns.
+// emit scales timer and message durations to wall-clock time so a viewer can draw
+// countdowns and packet flights.
 func (s *Session) emit(e core.Event) {
-	if e.Type == core.EventElectionTimer {
+	if e.Type == core.EventElectionTimer || e.Type == core.EventMessage {
 		e.DurationMs = int64(float64(e.DurationMs) * s.scale)
 	}
 	s.sink(e)
@@ -183,7 +195,7 @@ func (s *Session) Snapshot() []core.Event {
 	return append([]core.Event{{Type: core.EventQuorumStarted, Members: q.Size()}}, q.Snapshot()...)
 }
 
-// Close stops the cluster and waits for the session goroutine to exit.
+// Close stops the cluster, waits for the session goroutine to exit, then stops the clock.
 func (s *Session) Close() {
 	s.mu.Lock()
 	if s.closed {
@@ -197,6 +209,8 @@ func (s *Session) Close() {
 	if started {
 		<-s.stopped
 	}
+	// Last step: drop in-flight messages of the stopped cluster and every pending timer.
+	s.clock.Stop()
 }
 
 func clampMembers(n int) int {

@@ -102,6 +102,7 @@ func TestLatencyDelaysDelivery(t *testing.T) {
 		inner:    NewDirectNetworker(map[int]chan raft.Message{1: inbox}),
 		observer: obs,
 		latency:  func() time.Duration { return 80 * time.Millisecond },
+		timer:    NewRealTimer(),
 	}
 
 	start := time.Now()
