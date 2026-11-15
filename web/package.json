@@ -1,5 +1,5 @@
 {
-  "name": "quorum-beans",
+  "name": "quorum-kitties",
   "private": true,
   "version": "0.1.0",
   "description": "3D visualizer for the quorum election simulator",

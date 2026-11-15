@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A newer run on the same ref cancels an older PR run, but a run on main
+# (which may be deploying) is never cancelled.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Go vet
+        run: go vet ./...
+
+      # cmd/wasm only builds with GOOS=js GOARCH=wasm, so plain `go vet ./...` skips it.
+      - name: Go vet (wasm)
+        run: GOOS=js GOARCH=wasm go vet ./cmd/wasm
+
+      - name: Go test
+        run: go test -race ./...
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      # build:pages builds the WebAssembly module, runs `tsc --noEmit`, then builds the site.
+      - name: Build Pages site
+        working-directory: web
+        run: npm run build:pages
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-pages
+          path: web/dist-pages
+          if-no-files-found: error
+
+  deploy:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-pages
+          path: dist-pages
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist-pages --project-name=quorum-kitties --branch=main
