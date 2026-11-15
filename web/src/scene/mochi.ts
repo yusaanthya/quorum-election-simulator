@@ -3,8 +3,19 @@ import { CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import type { MemberState } from "../sim/state";
 import { Sigil } from "./magic";
 import { palette } from "./palette";
-import type { Theme } from "../scenery/kit";
-import { mulberry32 } from "../scenery/random";
+import { mulberry32 } from "./random";
+
+/** How members' lamp and floor sigils are tuned for a scene. */
+export interface MemberLook {
+  /** Lamp light height over the head (default 0.5). */
+  lampHeight: number;
+  /** Lamp light intensity at full level (default 2). */
+  lampIntensity: number;
+  /** Glow of the campaign and leader sigils. */
+  sigilGlow: number;
+  /** Multiplier of the sigils' dark underlay. */
+  sigilInk: number;
+}
 
 const TIMER_SEGMENTS = 72;
 const ROLE_LABEL: Record<string, string> = { Follower: "追隨者", Candidate: "候選人", Leader: "隊長" };
@@ -198,7 +209,7 @@ export class Mochi {
   /** Whether the leader wears the built-in crown; themes with their own headwear turn it off. */
   crownEnabled = true;
 
-  constructor(readonly id: number, look?: Theme["memberLook"]) {
+  constructor(readonly id: number, look?: MemberLook) {
     this.lampHeight = look?.lampHeight ?? 0.5;
     this.lampIntensity = look?.lampIntensity ?? 2;
     this.bodyMat = new THREE.MeshPhysicalMaterial({

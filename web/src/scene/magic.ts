@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { mulberry32 } from "../scenery/random";
+import { mulberry32 } from "./random";
 
 /**
  * Ornate magic circles drawn on a canvas once and used as flat textures, so they cost one
