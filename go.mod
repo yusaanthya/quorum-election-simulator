@@ -1,6 +1,6 @@
 module github.com/Anthya1104/quorum-election-cli
 
-go 1.24.1
+go 1.27.4
 
 require (
 	github.com/sirupsen/logrus v1.9.3

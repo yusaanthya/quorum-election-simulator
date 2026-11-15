@@ -244,7 +244,7 @@ class diagrams, role transitions, and a failover sequence are in
 
 ## Build from source
 
-Requires Git and **Go 1.24.1 or later**, as declared in [go.mod](go.mod).
+Requires Git and **Go 1.27.4 or later**, as declared in [go.mod](go.mod).
 Run these commands from a terminal:
 
 ```sh
