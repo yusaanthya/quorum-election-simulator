@@ -91,7 +91,12 @@ An item's Goal may name a plan file under `docs/`, for example
   block the item; the queue item is the authorization.
 - A verification step the run cannot perform (a manual look, a check that
   needs a person) is listed under `## Unresolved` in the pull request body
-  with the reason. It is never reported as done.
+  with the reason. It is never reported as done. It does not by itself
+  stop a run from merging the pull request: a plan's rule against merging
+  with an open check is replaced for runner pull requests (decision
+  2026-11-15 "Unverified checks do not block a runner merge"). A check that
+  was run and failed is different: it is a failed acceptance criterion, which
+  the critic blocks on.
 - Release steps a plan assigns to the owner (version bump, tag, release
   notes) are not done by a run.
 

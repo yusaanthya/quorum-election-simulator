@@ -29,6 +29,17 @@ comment, or any other GitHub write).
   ruleset requires `check` and `Codex Review Gate`, and head branches are
   deleted automatically after a merge.
 
+## 2026-11-15 - Unverified checks do not block a runner merge
+
+Some plans, such as those under `docs/sim-clock/`, let a check that needs a
+person be recorded as open for the owner and then forbid merging while a check
+is open. For runner pull requests the owner lifts that rule: a check the run
+could not perform is listed under `## Unresolved` in the pull request body and
+does not stop the runner from merging once `check` and `Codex Review Gate`
+pass. The owner accepts that a visible fault nobody looked at can reach the
+deployed site. A check that was run and failed still blocks. To hold one item
+for a look before it merges, the owner sets `merge: owner` on it.
+
 ## 2026-11-15 - Plans run by the night runner
 
 The plans under `docs/sim-clock/` say they are run with the `convergent-impl`
