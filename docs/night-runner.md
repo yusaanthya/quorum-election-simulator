@@ -382,10 +382,14 @@ A step is enabled by a pull request, merged by the owner, that changes its
 status cell. A run reads the cell from `main`; a cell that does not begin with
 **Enabled** means the step is off.
 
+A run cannot tell a manual start from a scheduled one, so it does not try to:
+it works whenever R1 is **Enabled**. Keeping the task's schedule disabled until
+R2 is the owner's job, not a check the run makes.
+
 | Step | What it turns on | Status |
 | --- | --- | --- |
 | R0 | This file, the decisions and the `AGENTS.md` section are on `main` | Enabled |
-| R1 | The task exists with its schedule disabled; one supervised manual run with a small item | Not started |
+| R1 | The task exists with its schedule disabled; one supervised manual run with a small item | Enabled |
 | R2 | The schedule | Not started |
 | R3 | Section 6: tending and merging | Not started |
 
