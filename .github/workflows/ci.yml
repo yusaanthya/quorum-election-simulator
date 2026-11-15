@@ -41,6 +41,10 @@ jobs:
             exit 1
           fi
 
+      # Unit tests for the Codex Review Gate script (no dependencies; Node's built-in runner).
+      - name: Test review gate script
+        run: node --test scripts/*.test.mjs
+
       - name: Go vet
         run: go vet ./...
 
