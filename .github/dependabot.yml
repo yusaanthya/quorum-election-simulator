@@ -1,0 +1,12 @@
+# Keeps the SHA-pinned actions in .github/workflows current, as one grouped
+# pull request a month. Security updates for Go modules and npm packages are
+# enabled in the repository settings and need no entry here.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

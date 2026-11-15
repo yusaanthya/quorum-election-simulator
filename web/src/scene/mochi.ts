@@ -3,6 +3,7 @@ import { CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import type { MemberState } from "../sim/state";
 import { Sigil } from "./magic";
 import { palette } from "./palette";
+import type { Theme } from "../scenery/kit";
 import { mulberry32 } from "../scenery/random";
 
 const TIMER_SEGMENTS = 72;
@@ -187,6 +188,8 @@ export class Mochi {
   private pop = 0;
   private crownScale = 0;
   private lampLevel = 0;
+  private readonly lampHeight: number;
+  private readonly lampIntensity: number;
   private campaign = 0;
   private leading = 0;
   private hover = 0;
@@ -195,7 +198,9 @@ export class Mochi {
   /** Whether the leader wears the built-in crown; themes with their own headwear turn it off. */
   crownEnabled = true;
 
-  constructor(readonly id: number) {
+  constructor(readonly id: number, look?: Theme["memberLook"]) {
+    this.lampHeight = look?.lampHeight ?? 0.5;
+    this.lampIntensity = look?.lampIntensity ?? 2;
     this.bodyMat = new THREE.MeshPhysicalMaterial({
       map: coatTexture(id),
       roughness: 0.5,
@@ -226,7 +231,7 @@ export class Mochi {
     this.lamp.scale.setScalar(0);
     this.root.add(this.lamp);
     this.light = new THREE.PointLight(palette.lamp, 0, 3.2, 1.6);
-    this.light.position.y = BODY_H + 0.5;
+    this.light.position.y = BODY_H + this.lampHeight;
     this.root.add(this.light);
 
     // Floor: election countdown ring, and sigils for campaigning and leading.
@@ -240,8 +245,8 @@ export class Mochi {
       ring.position.y = y;
       this.root.add(ring);
     }
-    this.campaignSigil = new Sigil(0.95, { scheme: "moon", simple: true, points: 5, seed: 1, ink: 0.55 });
-    this.leaderSigil = new Sigil(1.05, { scheme: "sun", simple: true, points: 6, seed: 0, ink: 0.5 });
+    this.campaignSigil = new Sigil(0.95, { scheme: "moon", simple: true, points: 5, seed: 1, ink: 0.55 * (look?.sigilInk ?? 1), ...(look && { glow: look.sigilGlow }) });
+    this.leaderSigil = new Sigil(1.05, { scheme: "sun", simple: true, points: 6, seed: 0, ink: 0.5 * (look?.sigilInk ?? 1), ...(look && { glow: look.sigilGlow }) });
     for (const s of [this.campaignSigil, this.leaderSigil]) {
       s.position.y = 0.05;
       s.opacity = 0;
@@ -323,7 +328,7 @@ export class Mochi {
     this.lamp.scale.setScalar(this.lampLevel);
     this.lamp.visible = this.lampLevel > 0.01;
     this.lamp.position.y = BODY_H + 0.55 + Math.sin(t * 1.6) * 0.04;
-    this.light.intensity = this.lampLevel * 2;
+    this.light.intensity = this.lampLevel * this.lampIntensity;
     // The name tag stays close to the ears, and rises above the lamp while leading.
     this.labelObj.position.y = BODY_H + LABEL_LIFT + this.lampLevel * (LABEL_LIFT_LEADER - LABEL_LIFT);
 

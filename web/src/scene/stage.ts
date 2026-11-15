@@ -2,8 +2,10 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import type { Theme } from "../scenery/kit";
 import { CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 
 export interface StageOptions {
@@ -14,7 +16,18 @@ export interface StageOptions {
   background: readonly [string, string, string];
   /** Shift the scene right on wide screens to leave room for the HUD (default true). */
   reserveHud?: boolean;
+  /** Light colors and intensities; absent keeps the default daylight. */
+  lighting?: Theme["lighting"];
+  /** Bloom strength; absent means no bloom pass. */
+  bloom?: number;
 }
+
+const DAYLIGHT = {
+  hemi: { sky: "#f7f3ff", ground: "#b9b1c9", intensity: 1.5 },
+  key: { color: "#fff2e4", intensity: 2.1 },
+  fill: { color: "#dfe6ff", intensity: 0.45 },
+  exposure: 1.05,
+};
 
 /** Room kept between the scenery and the edge of the screen, in world units. */
 const FIT_MARGIN = 0.25;
@@ -78,9 +91,10 @@ export class Stage {
       ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
       this.composer.addPass(ao);
     }
+    if (opts.bloom) this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), opts.bloom, 0.6, 0.85));
     this.composer.addPass(new OutputPass());
 
-    this.addLights();
+    this.addLights(opts.lighting);
     this.sceneryRadius = opts.scenery(this.scene);
 
     window.addEventListener("resize", () => this.resize());
@@ -125,10 +139,11 @@ export class Stage {
     this.labels.render(this.scene, this.camera);
   }
 
-  private addLights() {
-    this.scene.add(new THREE.HemisphereLight(0xf7f3ff, 0xb9b1c9, 1.5));
+  private addLights(l: Theme["lighting"] = DAYLIGHT) {
+    this.renderer.toneMappingExposure = l.exposure ?? 1.05;
+    this.scene.add(new THREE.HemisphereLight(l.hemi.sky, l.hemi.ground, l.hemi.intensity));
 
-    const key = new THREE.DirectionalLight(0xfff2e4, 2.1);
+    const key = new THREE.DirectionalLight(l.key.color, l.key.intensity);
     key.position.set(-7, 13, 9);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -142,7 +157,7 @@ export class Stage {
     s.far = 40;
     this.scene.add(key);
 
-    const fill = new THREE.DirectionalLight(0xdfe6ff, 0.45);
+    const fill = new THREE.DirectionalLight(l.fill.color, l.fill.intensity);
     fill.position.set(9, 5, -4);
     this.scene.add(fill);
   }
