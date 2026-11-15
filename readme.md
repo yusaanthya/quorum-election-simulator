@@ -345,6 +345,9 @@ storage, log replication, and dynamic membership.
   acceptance criteria.
 - [Codex review gate](docs/codex-review-gate.md): how the Codex review result
   becomes a required status.
+- [Night runner](docs/night-runner.md): the unattended nightly task, its queue
+  and its limits; [decisions](docs/decisions.md) records what the owner
+  authorized.
 
 The project evolved from heartbeat-based member removal to Raft elections,
 then separated the protocol from its runtime. The domain refactor also fixed
