@@ -1,0 +1,858 @@
+/* HUD art direction: a quiet storybook overlay for the stone academy hall.
+   Ivory parchment panels, thin gold hairlines, soft lavender shadows. */
+:root {
+  --ink: #3d3848;
+  --ink-soft: #6a6376;
+  --ink-faint: #787283;
+  --paper: rgba(250, 246, 238, 0.88);
+  --paper-solid: #faf6ee;
+  --paper-sunk: rgba(226, 218, 206, 0.5);
+  --hairline: rgba(190, 158, 96, 0.6);
+  --hairline-soft: rgba(190, 158, 96, 0.28);
+  --gold: #d9b56a;
+  --gold-ink: #7d5f22;
+  --lavender: #a99bd6;
+  --lavender-ink: #5f5496;
+  --sage: #8fbd9b;
+  --sage-ink: #47735a;
+  --grey: #b3aebb;
+  --rust: #c98a78;
+  --rust-ink: #9a4a3a;
+  --slate: #5a5179;
+  --shadow: 0 1px 2px rgba(64, 54, 88, 0.08), 0 10px 28px rgba(64, 54, 88, 0.16);
+  --radius: 16px;
+  --gap: 20px;
+  --sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", "Heiti TC", system-ui, sans-serif;
+  --serif: "Noto Serif TC", "Songti TC", "PMingLiU", "Source Han Serif TC", Georgia, serif;
+  font-family: var(--sans);
+  color: var(--ink);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: radial-gradient(120% 95% at 50% 40%, #ece7f3 0%, #cec5df 60%, #a69bc2 100%);
+}
+
+#scene {
+  position: fixed;
+  inset: 0;
+}
+
+#scene canvas {
+  display: block;
+  touch-action: none;
+}
+
+.labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Name tags above each member: an ivory plaque, the role carries the accent */
+.member-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 3px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(250, 246, 238, 0.86);
+  box-shadow: 0 2px 8px rgba(64, 54, 88, 0.16);
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.member-label .member-name {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #e9e3ee;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+
+.member-label.follower .member-name {
+  background: #dcebdf;
+}
+
+.member-label.candidate {
+  border-color: rgba(169, 155, 214, 0.75);
+}
+
+.member-label.candidate .member-name {
+  background: #ddd6f3;
+}
+
+.member-label.candidate .member-role {
+  color: var(--lavender-ink);
+}
+
+.member-label.leader {
+  border-color: var(--hairline);
+}
+
+.member-label.leader .member-name {
+  background: #f0dba6;
+}
+
+.member-label.leader .member-role {
+  color: var(--gold-ink);
+  font-weight: 700;
+}
+
+.member-label.down {
+  opacity: 0.62;
+  color: var(--ink-faint);
+}
+
+/* HUD */
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.panel {
+  position: relative;
+  pointer-events: auto;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px) saturate(1.05);
+  -webkit-backdrop-filter: blur(12px) saturate(1.05);
+}
+
+/* A second, fainter hairline set inside the edge, like a ruled card */
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: calc(var(--radius) - 4px);
+  pointer-events: none;
+}
+
+h1,
+h2,
+p,
+dl,
+dd,
+ul {
+  margin: 0;
+  padding: 0;
+}
+
+ul {
+  list-style: none;
+}
+
+/* --- Title card --- */
+.title-card {
+  position: absolute;
+  top: var(--gap);
+  left: var(--gap);
+  width: 388px;
+  padding: 18px 20px 14px;
+}
+
+h1 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--serif);
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  color: var(--ink);
+}
+
+h1 span {
+  font-size: 14px;
+  letter-spacing: 0.22em;
+  color: var(--gold-ink);
+}
+
+.subtitle {
+  margin-top: 3px;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+}
+
+/* Gold rule with a small diamond in the middle */
+.rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 11px 0 10px;
+}
+
+.rule::before,
+.rule::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--hairline));
+}
+
+.rule::after {
+  transform: scaleX(-1);
+}
+
+.rule i {
+  width: 6px;
+  height: 6px;
+  transform: rotate(45deg);
+  border: 1px solid var(--gold);
+  background: #f3e3b8;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr 1fr 1fr;
+}
+
+.stats div {
+  padding: 0 10px;
+  border-left: 1px solid var(--hairline-soft);
+}
+
+.stats div:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.stats dt {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.stats dd {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 1px;
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats dd.pending {
+  font-size: 14px;
+  line-height: 24.3px;
+  color: var(--lavender-ink);
+}
+
+.stats dd.warn {
+  color: var(--rust-ink);
+}
+
+.crown svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+  fill: var(--gold);
+  stroke: #b8923f;
+  stroke-width: 0.8;
+  stroke-linejoin: round;
+}
+
+/* Member roster: one small seal per member */
+.roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.roster li {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1.5px solid var(--sage);
+  background: rgba(255, 255, 255, 0.55);
+  font-size: 12px;
+  color: var(--ink);
+  transition: background 0.3s ease, border-color 0.3s ease, opacity 0.3s ease;
+}
+
+.roster b {
+  font-weight: 700;
+  line-height: 1;
+}
+
+.roster span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.roster li.candidate {
+  border-color: var(--lavender);
+  background: #e4def6;
+  box-shadow: 0 0 0 2.5px rgba(169, 155, 214, 0.3);
+}
+
+.roster li.leader {
+  border-color: #b8923f;
+  background: linear-gradient(160deg, #f6e6b9, #e2c27c);
+  box-shadow: 0 0 0 2.5px rgba(217, 181, 106, 0.32);
+  color: #4d3a12;
+}
+
+.roster li.down {
+  border: 1.5px dashed var(--grey);
+  background: transparent;
+  color: var(--ink-faint);
+}
+
+.roster li.down b {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* --- Controls --- */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.ctl-label {
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--ink-soft);
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline-soft);
+  background: var(--paper-sunk);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.segmented button {
+  min-width: 30px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-weight: 500;
+  color: var(--ink-soft);
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.segmented button:hover {
+  color: var(--ink);
+}
+
+.segmented button.active {
+  background: var(--paper-solid);
+  color: var(--ink);
+  font-weight: 700;
+  box-shadow: 0 0 0 1px var(--hairline), 0 1px 3px rgba(64, 54, 88, 0.14);
+}
+
+.btn {
+  height: 32px;
+  padding: 0 13px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: rgba(255, 253, 248, 0.7);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  transition: background 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: #fffdf8;
+  box-shadow: 0 2px 8px rgba(64, 54, 88, 0.12);
+}
+
+.btn-primary {
+  border-color: var(--slate);
+  background: var(--slate);
+  color: #fbf7ee;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #665c88;
+}
+
+.btn:active:not(:disabled) {
+  box-shadow: inset 0 1px 3px rgba(40, 32, 60, 0.25);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--lavender-ink);
+  outline-offset: 2px;
+}
+
+.conn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 11px;
+  font-size: 11.5px;
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+}
+
+.conn i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sage);
+  box-shadow: 0 0 0 3px rgba(143, 189, 155, 0.28);
+}
+
+.conn.offline i {
+  background: var(--rust);
+  box-shadow: 0 0 0 3px rgba(201, 138, 120, 0.28);
+}
+
+/* --- Bottom dock: feed on the left, legend on the right --- */
+.dock {
+  position: absolute;
+  left: var(--gap);
+  right: var(--gap);
+  bottom: var(--gap);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  pointer-events: none;
+}
+
+h2 {
+  font-family: var(--serif);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--gold-ink);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel-head h2 {
+  flex: 1;
+}
+
+.chip-btn {
+  display: grid;
+  place-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--ink-soft);
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.chip-btn:hover,
+.chip-btn[aria-expanded="true"].legend-toggle {
+  background: rgba(255, 253, 248, 0.8);
+  color: var(--ink);
+}
+
+.chip-btn.icon {
+  width: 26px;
+  padding: 0;
+}
+
+.chip-btn svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  transition: transform 0.25s ease;
+}
+
+.feed.collapsed .feed-toggle svg {
+  transform: rotate(180deg);
+}
+
+.legend-toggle {
+  display: none;
+}
+
+.feed {
+  width: 340px;
+  padding: 12px 16px 12px;
+}
+
+.feed-list {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--hairline-soft);
+}
+
+.feed-list:empty::before {
+  content: "等待第一個事件…";
+  display: block;
+  padding: 3px 0;
+  color: var(--ink-faint);
+}
+
+.feed-list li {
+  position: relative;
+  padding: 3px 0 3px 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  animation: feed-in 0.4s ease-out;
+}
+
+.feed-list li::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--grey);
+}
+
+.feed-list li:nth-child(n + 2) {
+  color: var(--ink-soft);
+}
+
+.feed-list li:nth-child(n + 5) {
+  color: var(--ink-faint);
+}
+
+.feed-list li.vote::before {
+  background: var(--lavender);
+}
+
+.feed-list li.good {
+  color: var(--gold-ink);
+  font-weight: 500;
+}
+
+.feed-list li.good::before {
+  border-radius: 1px;
+  background: var(--gold);
+  transform: rotate(45deg);
+}
+
+.feed-list li.bad {
+  color: var(--rust-ink);
+}
+
+.feed-list li.bad::before {
+  background: var(--rust);
+}
+
+.feed-list li:nth-child(n + 2).good,
+.feed-list li:nth-child(n + 2).bad {
+  opacity: 0.82;
+}
+
+.feed.collapsed .feed-list li:nth-child(n + 2) {
+  display: none;
+}
+
+@keyframes feed-in {
+  from {
+    transform: translateY(4px);
+    opacity: 0;
+  }
+}
+
+.legend {
+  padding: 12px 18px 12px;
+  font-size: 12.5px;
+}
+
+.legend-cols {
+  display: flex;
+  gap: 22px;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline-soft);
+}
+
+.legend ul {
+  display: grid;
+  gap: 5px;
+  align-content: start;
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.ico svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.ico-leader svg { fill: var(--gold); stroke: #b8923f; stroke-width: 0.8; stroke-linejoin: round; }
+.ico-candidate svg { stroke: #9486c9; fill: #9486c9; }
+.ico-follower svg { stroke: #7fb08d; }
+.ico-follower svg .track { stroke: rgba(127, 176, 141, 0.25); }
+.ico-down svg { stroke: var(--grey); stroke-dasharray: 2.6 2.4; }
+.ico-ask svg { stroke: #b8923f; }
+.ico-yes svg { fill: #d99aa5; }
+.ico-no svg { fill: var(--grey); }
+.ico-beat svg { fill: #86bfae; stroke: #86bfae; }
+
+.tip {
+  margin-top: 9px;
+  font-size: 11.5px;
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+}
+
+/* Short desktop windows: drop the secondary lines so the panels stay clear of each other */
+@media (min-width: 641px) and (max-height: 620px) {
+  .subtitle,
+  .tip {
+    display: none;
+  }
+}
+
+/* Phones: a compact strip on top, a one-line feed at the bottom, legend on demand */
+@media (max-width: 640px) {
+  :root {
+    --gap: 10px;
+    --radius: 14px;
+  }
+
+  .title-card {
+    top: max(var(--gap), env(safe-area-inset-top));
+    width: calc(100vw - 2 * var(--gap));
+    padding: 12px 14px 12px;
+  }
+
+  h1 {
+    font-size: 19px;
+  }
+
+  h1 span {
+    font-size: 12px;
+  }
+
+  .subtitle {
+    display: none;
+  }
+
+  .rule {
+    margin: 7px 0 7px;
+  }
+
+  .conn {
+    margin-top: 8px;
+    font-size: 11px;
+  }
+
+  .stats dt {
+    font-size: 10px;
+  }
+
+  .stats dd {
+    font-size: 15px;
+  }
+
+  .stats dd.pending {
+    font-size: 13px;
+    line-height: 20.25px;
+  }
+
+  .stats div {
+    padding: 0 8px;
+  }
+
+  .roster {
+    gap: 6px;
+    margin-top: 9px;
+  }
+
+  .roster li {
+    width: 22px;
+    height: 22px;
+    font-size: 11px;
+  }
+
+  .controls {
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .ctl-label {
+    display: none;
+  }
+
+  .segmented button {
+    min-width: 34px;
+    height: 32px;
+  }
+
+  .btn {
+    height: 36px;
+    padding: 0 12px;
+  }
+
+  .member-label {
+    font-size: 10px;
+  }
+
+  .dock {
+    bottom: max(var(--gap), env(safe-area-inset-bottom));
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .feed {
+    width: auto;
+    padding: 8px 10px 9px 14px;
+    font-size: 12.5px;
+  }
+
+  /* Collapsed: the latest line and the two toggles share one row */
+  .feed.collapsed {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 8px;
+  }
+
+  .feed.collapsed h2 {
+    display: none;
+  }
+
+  .feed.collapsed .panel-head {
+    order: 2;
+  }
+
+  .feed.collapsed .feed-list {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .feed-list li:nth-child(n + 5) {
+    display: none;
+  }
+
+  .legend-toggle {
+    display: grid;
+  }
+
+  .chip-btn {
+    height: 30px;
+  }
+
+  .chip-btn.icon {
+    width: 30px;
+  }
+
+  .legend {
+    display: none;
+    padding: 10px 14px;
+    font-size: 12px;
+  }
+
+  .legend.open {
+    display: block;
+  }
+
+  .legend h2 {
+    display: none;
+  }
+
+  .legend-cols {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+    justify-content: space-between;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feed-list li {
+    animation: none;
+  }
+
+  * {
+    transition: none !important;
+  }
+}
+
+.roster:empty {
+  display: none;
+}
+
+/* Phones: name tags shrink to the numbered badge so they don't cover the small scene. */
+@media (max-width: 640px) {
+  .member-label .member-role {
+    display: none;
+  }
+}

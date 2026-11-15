@@ -1,0 +1,188 @@
+import "@fontsource/nunito/latin-600.css";
+import "@fontsource/nunito/latin-800.css";
+import "./style.css";
+import * as THREE from "three";
+import { Mochi } from "./scene/mochi";
+import { PacketSystem } from "./scene/packets";
+import { Sparkles } from "./scene/sparkles";
+import { Stage } from "./scene/stage";
+import { academy } from "./scenery/academy";
+import { standAt, type Theme } from "./scenery/kit";
+import type { Role, SimEvent } from "./sim/events";
+import { ServerSource, WasmSource, type SimSource } from "./sim/source";
+import { ClusterState } from "./sim/state";
+import { Hud } from "./ui/hud";
+
+const params = new URLSearchParams(location.search);
+const wasmMode = import.meta.env.MODE === "wasm";
+const timeScale = clampNumber(params.get("slowmo"), 1, 10, 3);
+const source: SimSource = wasmMode
+  ? new WasmSource({ members: clampNumber(params.get("members"), 1, 9, 5), timeScale })
+  : new ServerSource();
+
+// Ambient occlusion is the costliest pass; skip it on small screens or with ?ao=0.
+const ambientOcclusion = params.get("ao") !== "0" && window.innerWidth >= 640;
+const theme: Theme = academy;
+const stage = new Stage(document.getElementById("scene")!, {
+  ambientOcclusion,
+  scenery: (scene) => theme.build(scene),
+  background: theme.background,
+});
+const state = new ClusterState();
+const packets = new PacketSystem(stage.scene, theme.keepClear);
+const sparkles = new Sparkles(stage.scene);
+let beans: Mochi[] = [];
+/** The role each member last showed, so the theme hears about changes once. */
+let shownRoles: (Role | "Down" | null)[] = [];
+
+const hud = new Hud(document.getElementById("hud")!, source.label, wasmMode ? timeScale : null, {
+  restart: (n) => source.restart(n),
+  killLeader: () => {
+    const leader = state.leader;
+    if (leader) source.kill(leader.id);
+  },
+});
+
+const from = new THREE.Vector3();
+const to = new THREE.Vector3();
+
+function rebuild(n: number) {
+  for (const b of beans) {
+    stage.scene.remove(b.root);
+    b.dispose();
+  }
+  packets.clear();
+  beans = Array.from({ length: n }, (_, id) => {
+    const bean = new Mochi(id);
+    theme.dress?.(bean);
+    const [x, z] = standAt(theme, id, n);
+    bean.root.position.set(x, 0, z);
+    stage.scene.add(bean.root);
+    return bean;
+  });
+  shownRoles = beans.map(() => null);
+}
+
+function onEvent(e: SimEvent) {
+  if (state.apply(e, performance.now())) {
+    rebuild(state.size);
+    hud.log(`新的一局：${e.members} 位成員`, "good");
+    return;
+  }
+  const bean = beans[e.member];
+  if (!bean) return;
+
+  switch (e.type) {
+    case "message": {
+      const target = beans[e.peer];
+      // A hidden tab gets no animation frames, so packets spawned there would never
+      // expire and would all appear at once when the tab is shown again.
+      if (target && e.message && !document.hidden) {
+        packets.spawn(e.message, e.granted, e.durationMs, bean.anchor(from), target.anchor(to), () => target.receive());
+      }
+      break;
+    }
+    case "election_started":
+      hud.log(`成員 ${e.member} 發起選舉 · Term ${e.term}`);
+      break;
+    case "vote_granted":
+      hud.log(`成員 ${e.member} 投給成員 ${e.peer}`, "vote");
+      break;
+    case "became_leader":
+      hud.log(`成員 ${e.member} 以 ${e.votes} 票當選隊長`, "good");
+      sparkles.burst(bean.root.getWorldPosition(from));
+      break;
+    case "lost_quorum":
+      hud.log(`成員 ${e.member} 聯絡不到過半成員，退位`, "bad");
+      break;
+    case "halted":
+      hud.log(`成員 ${e.member} 選舉失敗太多次，停止運作`, "bad");
+      break;
+    case "stopped":
+      if (!state.members[e.member]?.halted) hud.log(`成員 ${e.member} 下線`, "bad");
+      break;
+    case "quorum_ended":
+      hud.log("所有成員都停了，稍後自動重新開局", "bad");
+      break;
+  }
+}
+
+// Clicking a bean stops it; a drag that rotates the camera does not count.
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let downAt: { x: number; y: number } | null = null;
+let hovered: Mochi | null = null;
+
+function pick(ev: PointerEvent): Mochi | null {
+  const rect = stage.renderer.domElement.getBoundingClientRect();
+  pointer.set(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(pointer, stage.camera);
+  const hit = raycaster.intersectObjects(beans.map((b) => b.hitMesh), false)[0];
+  return hit ? (beans[hit.object.userData.memberId as number] ?? null) : null;
+}
+
+const canvas = stage.renderer.domElement;
+canvas.addEventListener("pointerdown", (ev) => (downAt = { x: ev.clientX, y: ev.clientY }));
+canvas.addEventListener("pointerup", (ev) => {
+  if (!downAt || Math.hypot(ev.clientX - downAt.x, ev.clientY - downAt.y) > 6) return;
+  const bean = pick(ev);
+  if (bean && state.members[bean.id]?.alive) source.kill(bean.id);
+});
+canvas.addEventListener("pointermove", (ev) => {
+  if (ev.pointerType !== "mouse") return;
+  const bean = pick(ev);
+  const target = bean && state.members[bean.id]?.alive ? bean : null;
+  if (target !== hovered) {
+    hovered?.setHover(false);
+    target?.setHover(true);
+    hovered = target;
+    canvas.style.cursor = target ? "pointer" : "";
+  }
+});
+
+const timer = new THREE.Timer();
+timer.connect(document); // Pauses the clock while the tab is hidden
+renderLoop();
+function renderLoop(time?: number) {
+  requestAnimationFrame(renderLoop);
+  timer.update(time);
+  const dt = Math.min(timer.getDelta(), 0.1);
+  const t = timer.getElapsed();
+  const now = performance.now();
+  stage.update();
+  theme.animate?.(t, dt);
+  beans.forEach((b, i) => {
+    const m = state.members[i];
+    if (!m) return;
+    const role = m.alive ? m.role : "Down";
+    if (role !== shownRoles[i]) {
+      shownRoles[i] = role;
+      theme.onRole?.(b, role);
+    }
+    b.update(dt, t, m, now, stage.camera.position);
+  });
+  packets.update(dt, stage.camera);
+  sparkles.update(dt);
+  hud.update(state);
+  stage.render();
+}
+
+if (!wasmMode) {
+  fetch("/api/config")
+    .then((r) => r.json())
+    .then((cfg: { timeScale: number }) => hud.setTimeScale(cfg.timeScale))
+    .catch(() => {});
+}
+
+source
+  .connect(onEvent, (connected) => hud.setConnected(connected))
+  .catch((err) => {
+    console.error(err);
+    hud.setConnected(false);
+    hud.log(`連線失敗：${err instanceof Error ? err.message : err}`, "bad");
+  });
+
+function clampNumber(raw: string | null, min: number, max: number, fallback: number) {
+  const n = Number(raw);
+  return raw !== null && Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+}

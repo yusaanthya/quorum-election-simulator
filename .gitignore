@@ -1,0 +1,3 @@
+# Built visualizer, embedded by go:embed; only the placeholder is tracked
+/internal/web/dist/*
+!/internal/web/dist/.gitkeep

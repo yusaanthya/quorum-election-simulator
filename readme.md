@@ -11,7 +11,7 @@ leader election and heartbeats; log replication and persistent storage are
 outside its scope.
 
 [Quick start](#quick-start) · [Try a failover](#try-a-failover) ·
-[Architecture](#architecture) · [Build from source](#build-from-source) ·
+[3D visualizer](#3d-visualizer) · [Architecture](#architecture) · [Build from source](#build-from-source) ·
 [Tests](#tests) · [Limitations](#limitations) · [Further reading](#further-reading)
 
 ## Quick start
@@ -78,6 +78,65 @@ If too few members remain to form a majority, elections keep failing until the
 surviving members halt. Once all members stop, the CLI automatically starts a
 fresh cluster. Ending a quorum does not exit the application.
 
+## 3D visualizer
+
+`serve` opens the same simulation in the browser as a three.js scene: a small
+magic academy hall where each member is a round cat standing around a rune
+circle. Candidates hop on a silver circle, the leader wears a crown and stands
+on a gold one, and stopped members close their eyes and slump. Messages fly
+between members: letters are vote requests, hearts are granted votes, grey
+pebbles are refusals, and mint dots are heartbeats. The ring under each
+follower counts down its election timeout. Click a member to stop it, or use
+the buttons to stop the leader or restart with 3, 5, or 7 members.
+
+![The visualizer after a re-election](docs/visualizer-preview.png)
+
+```sh
+make web        # build the front end once (Node.js 20+)
+go run ./cmd/main.go serve --members 5
+```
+
+Then open <http://localhost:8080>. Flags:
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--addr` | `:8080` | Address to listen on |
+| `--slowmo` | `3` | Multiplies every timer and message delay so elections are easy to follow; `1` is real time |
+| `--members`, `-m` | `3` | Initial member count (1–9) |
+
+The visualizer adds a simulated one-way message delay of 180–260 ms (before
+`--slowmo`), so packets land when the receiving member actually processes them.
+`play` keeps instant delivery.
+
+### Developing the front end
+
+The front end lives in [`web/`](web) (Vite + TypeScript + three.js). Run the Go
+server and the Vite dev server side by side; Vite proxies `/api` to port 8080:
+
+```sh
+go run ./cmd/main.go serve
+```
+
+```sh
+cd web && npm install && npm run dev
+```
+
+### Free hosting on Cloudflare Pages
+
+Cloudflare Pages serves static files only, so the hosted version runs the Go
+simulation **in the browser** as WebAssembly ([`cmd/wasm`](cmd/wasm/main.go))
+instead of talking to `serve`. It uses the same `internal/core` and
+`internal/sim` code, and needs no server or paid plan.
+
+```sh
+make pages                      # builds web/dist-pages (Go and Node.js required)
+cd web && npx wrangler login    # once
+npm run deploy:pages            # rebuilds and uploads to the quorum-beans Pages project
+```
+
+The hosted page accepts `?members=5&slowmo=3` in its URL. To preview the
+WebAssembly build locally, run `npm run dev:wasm` in `web/`.
+
 ## Architecture
 
 ### Responsibilities and boundaries
@@ -120,6 +179,9 @@ within the same process.
 | `raft.Node` | Owns role, term, votes, and election rules; returns ordered outputs without performing I/O. |
 | `raft.Cluster` | Computes the majority from the fixed membership size. |
 | `Timer`, `Networker`, `QuorumEventNotifier` | Provide boundaries for timing, message delivery, and notifications. |
+| `Observer` | Receives a JSON-friendly event for every state change, timer reset, and message; the visualizer draws from these. |
+| `sim.Session` | Keeps a cluster running for the visualizer: slow motion, message delay, kill, restart, and auto-restart after all members halt. |
+| `web` / `cmd/wasm` | Expose a `Session` to the browser, over Server-Sent Events from `serve` or as WebAssembly on a static site. |
 
 ### From an event to its effects
 
@@ -241,6 +303,10 @@ go test -race ./...
 - [Runtime tests](internal/core/core_test.go) cover initialization, leader
   election, failover, and termination after quorum loss using a mock timer.
   They still use short sleeps to allow goroutines to run.
+- [Observer](internal/core/observer_test.go), [session](internal/sim/session_test.go),
+  and [server](internal/web/server_test.go) tests cover visualizer events,
+  message delay, slow motion, restarts, and the event stream API.
+- The front end type-checks with `cd web && npm run typecheck`.
 
 Run the failover test alone with:
 
@@ -253,8 +319,8 @@ go test ./internal/core -run '^TestFailoverReElection$' -count=1
 - **Election simulator:** no log replication, snapshots, or persistence of
   terms and votes. It is not a production Raft implementation.
 - **Single-process transport:** messages use buffered channels, not a real
-  network. A full inbox drops messages; network delay and partitions are not
-  explicitly simulated.
+  network. A full inbox drops messages. Only the visualizer adds a fixed-range
+  delivery delay; partitions are not simulated.
 - **Static membership:** stopped members still count toward the original
   majority. `restart` creates an entirely new cluster rather than recovering
   a stopped member's state.

@@ -35,7 +35,10 @@ type Member struct {
 	timer     Timer
 	networker Networker
 	notifier  QuorumEventNotifier
+	observer  Observer
 	wg        *sync.WaitGroup
+
+	lastStatus raft.Status // Last status sent to observer; guarded by mu
 
 	// Owned by the Run goroutine
 	electionTimer     ITimer
@@ -44,7 +47,14 @@ type Member struct {
 }
 
 func NewMember(ctx context.Context, id int, timer Timer, networker Networker, notifier QuorumEventNotifier, initialPeers []int, inbox chan raft.Message, wg *sync.WaitGroup) *Member {
+	return newMember(ctx, id, timer, networker, notifier, nil, initialPeers, inbox, wg)
+}
+
+func newMember(ctx context.Context, id int, timer Timer, networker Networker, notifier QuorumEventNotifier, observer Observer, initialPeers []int, inbox chan raft.Message, wg *sync.WaitGroup) *Member {
 	memberCtx, cancel := context.WithCancel(ctx)
+	if observer == nil {
+		observer = noOpObserver{}
+	}
 
 	return &Member{
 		ID:        id,
@@ -55,6 +65,7 @@ func NewMember(ctx context.Context, id int, timer Timer, networker Networker, no
 		timer:     timer,
 		networker: networker,
 		notifier:  notifier,
+		observer:  observer,
 		wg:        wg,
 	}
 }
@@ -63,7 +74,16 @@ func (m *Member) Run() {
 	defer m.wg.Done()
 	logrus.Infof("Member %d: Started Raft Node", m.ID)
 
-	m.electionTimer = m.timer.NewTimer(electionTimeout())
+	timeout := electionTimeout()
+	m.electionTimer = m.timer.NewTimer(timeout)
+	m.mu.Lock()
+	m.lastStatus = m.node.Status()
+	// A member stopped before it started has already published stopped; stay silent.
+	if m.ctx.Err() == nil {
+		m.observer.OnEvent(statusEvent(m.lastStatus, true))
+		m.observer.OnEvent(Event{Type: EventElectionTimer, Member: m.ID, DurationMs: timeout.Milliseconds()})
+	}
+	m.mu.Unlock()
 
 	// Leader-only tickers, stopped until the node becomes leader
 	m.heartbeatTicker = m.timer.NewTicker(heartbeatInterval)
@@ -103,6 +123,11 @@ func (m *Member) handle(event func() []raft.Output) {
 		return
 	}
 	m.apply(event())
+
+	if s := m.node.Status(); s != m.lastStatus {
+		m.lastStatus = s
+		m.observer.OnEvent(statusEvent(s, m.ctx.Err() == nil))
+	}
 }
 
 func (m *Member) apply(outputs []raft.Output) {
@@ -111,10 +136,13 @@ func (m *Member) apply(outputs []raft.Output) {
 		case raft.Send:
 			m.networker.SendTo(o.Msg, o.Msg.To)
 		case raft.ResetElectionTimer:
+			timeout := electionTimeout()
 			m.electionTimer.Stop()
-			m.electionTimer.Reset(electionTimeout())
+			m.electionTimer.Reset(timeout)
+			m.observer.OnEvent(Event{Type: EventElectionTimer, Member: m.ID, DurationMs: timeout.Milliseconds()})
 		case raft.StopElectionTimer:
 			m.electionTimer.Stop()
+			m.observer.OnEvent(Event{Type: EventElectionTimerStopped, Member: m.ID})
 		case raft.StartHeartbeats:
 			m.quorumCheckTicker.Reset(quorumCheckInterval)
 			m.heartbeatTicker.Reset(heartbeatInterval)
@@ -123,18 +151,24 @@ func (m *Member) apply(outputs []raft.Output) {
 			m.quorumCheckTicker.Stop()
 		case raft.BecameFollower:
 			logrus.Infof("Member %d: Becoming Follower for term %d", m.ID, o.Term)
+			m.observer.OnEvent(Event{Type: EventBecameFollower, Member: m.ID, Term: o.Term})
 		case raft.StartedElection:
 			logrus.Infof("Member %d: Starting election for term %d (Failures: %d)", m.ID, o.Term, o.Failures)
+			m.observer.OnEvent(Event{Type: EventElectionStarted, Member: m.ID, Term: o.Term, Failures: o.Failures})
 		case raft.VoteGranted:
 			logrus.Infof("Member %d: Voted for %d in term %d", m.ID, o.Candidate, o.Term)
+			m.observer.OnEvent(Event{Type: EventVoteGranted, Member: m.ID, Peer: o.Candidate, Term: o.Term})
 		case raft.BecameLeader:
 			logrus.Infof("Member %d: Won election for term %d with %d votes", m.ID, o.Term, o.Votes)
+			m.observer.OnEvent(Event{Type: EventBecameLeader, Member: m.ID, Term: o.Term, Votes: o.Votes})
 			m.notifier.NotifyLeaderElected(m.ID)
 		case raft.LostQuorum:
 			logrus.Warnf("Member %d: Lost quorum (contacted %d peers). Stepping down.", m.ID, o.Contacted)
+			m.observer.OnEvent(Event{Type: EventLostQuorum, Member: m.ID, Contacted: o.Contacted})
 		case raft.Halted:
 			logrus.Errorf("Member %d: Exceeded max election failures (%d). Stopping.", m.ID, raft.MaxElectionFailures)
-			m.Stop()
+			m.observer.OnEvent(Event{Type: EventHalted, Member: m.ID, Failures: o.Failures})
+			m.stopLocked()
 		}
 	}
 }
@@ -146,9 +180,19 @@ func (m *Member) Status() raft.Status {
 	return m.node.Status()
 }
 
+// Stop waits for the event being handled, so a status published by that event can never
+// follow the stopped event and make a dead member look alive again.
 func (m *Member) Stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopLocked()
+}
+
+// stopLocked stops the member; the caller holds mu.
+func (m *Member) stopLocked() {
 	m.cancel()
 	logrus.Infof("Member %d: Stopped.", m.ID)
+	m.observer.OnEvent(Event{Type: EventStopped, Member: m.ID})
 }
 
 func (m *Member) IsAlive() bool {
