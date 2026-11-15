@@ -80,8 +80,16 @@ a test fixture is not evidence that branch protection is enabled.
 After activation, with auto-merge allowed in the repository settings and
 `check` and `Codex Review Gate` both required, a pull request with auto-merge
 enabled merges once CI passes and Codex has reviewed its head commit with no
-blocking finding. A pull request
-that changes this gate (`.github/workflows/codex-review-gate.yml` or
-`scripts/codex-review-gate.mjs`) is evaluated by the copy on `main`, so its
-own checks do not exercise the change: do not enable auto-merge on it, and
-test it first with a manual dispatch of the workflow from its branch.
+blocking finding.
+
+Do not enable auto-merge on a pull request that changes the gate itself. Its
+`Codex Review Gate` status is produced by the copy on `main`, so a passing
+status says nothing about the change:
+
+- A change to `.github/workflows/codex-review-gate.yml` can be tried before
+  merge by a manual dispatch of the workflow from the pull request's branch.
+  A dispatch uses that branch's workflow file, but the workflow still checks
+  out `main`, so it runs the script from `main`.
+- A change to `scripts/codex-review-gate.mjs` is exercised before merge only
+  by its unit tests in the `check` job. Its behavior on hosted events can be
+  confirmed only after merge, with a manual dispatch on `main`.
