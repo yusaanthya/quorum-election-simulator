@@ -343,6 +343,8 @@ storage, log replication, and dynamic membership.
   to a pure Raft domain model.
 - [Makefile design](docs/makefile-cleanup/01-spec.md): build behavior and its
   acceptance criteria.
+- [Codex review gate](docs/codex-review-gate.md): how the Codex review result
+  becomes a required status.
 
 The project evolved from heartbeat-based member removal to Raft elections,
 then separated the protocol from its runtime. The domain refactor also fixed
