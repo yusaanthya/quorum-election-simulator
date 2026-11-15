@@ -20,14 +20,15 @@ init:
 	@mkdir -p $(BIN_DIR)
 
 
-# quorum-election builds; the old binary is removed first so a failed build leaves none behind
+# quorum-election builds; the old binary is removed first so a failed build leaves none behind;
+# -trimpath keeps the builder's absolute source paths out of the binary
 define build_quorum_election
 .PHONY: build-quorum-election-$(1)-$(2)
 build-quorum-election-$(1)-$(2): init
 	@echo "Building quorum-election for $(1)/$(2)..."
 	@mkdir -p $(OUT_DIR)/log
 	rm -f $(OUT_DIR)/quorum_election_app_$(1)_$(2)$(if $(filter windows,$(1)),.exe,)
-	GOOS=$(1) GOARCH=$(2) go build $(LDFLAGS) -o $(OUT_DIR)/quorum_election_app_$(1)_$(2)$(if $(filter windows,$(1)),.exe,) ./cmd/main.go
+	GOOS=$(1) GOARCH=$(2) go build -trimpath $(LDFLAGS) -o $(OUT_DIR)/quorum_election_app_$(1)_$(2)$(if $(filter windows,$(1)),.exe,) ./cmd/main.go
 endef
 $(foreach OS,$(OS_LIST),$(foreach ARCH,$(ARCH_LIST),$(eval $(call build_quorum_election,$(OS),$(ARCH)))))
 
