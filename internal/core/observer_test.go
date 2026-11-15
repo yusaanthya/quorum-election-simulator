@@ -124,3 +124,52 @@ func TestLatencyDelaysDelivery(t *testing.T) {
 		t.Fatal("message never delivered")
 	}
 }
+
+// A member killed while it publishes a status must not report stopped until that status is out.
+func TestStopWaitsForStatusInFlight(t *testing.T) {
+	mockTimer := NewMockTimer(time.Now())
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	rec := &recordingObserver{}
+	obs := ObserverFunc(func(e Event) {
+		rec.OnEvent(e)
+		if e.Type == EventStatus && e.Role != raft.Follower.String() {
+			once.Do(func() {
+				close(entered)
+				<-release
+			})
+		}
+	})
+	q := NewQuorumWithOptions(1, mockTimer, Options{Notifier: NewMockNotifier(), Observer: obs})
+	q.Start()
+	defer q.Stop()
+	// Runs before q.Stop, so a failing test never leaves the member blocked in the observer.
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+
+	time.Sleep(50 * time.Millisecond)
+	mockTimer.AdvanceTime(3 * time.Second)
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("member never published a status after its election timeout")
+	}
+
+	go q.KillMember(0)
+	time.Sleep(50 * time.Millisecond)
+	if _, ok := rec.find(func(e Event) bool { return e.Type == EventStopped }); ok {
+		t.Fatal("stopped was published while a live status was still being delivered")
+	}
+	unblock()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := rec.find(func(e Event) bool { return e.Type == EventStopped }); ok {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("stopped was never published")
+}

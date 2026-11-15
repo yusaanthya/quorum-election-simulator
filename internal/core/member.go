@@ -165,7 +165,7 @@ func (m *Member) apply(outputs []raft.Output) {
 		case raft.Halted:
 			logrus.Errorf("Member %d: Exceeded max election failures (%d). Stopping.", m.ID, raft.MaxElectionFailures)
 			m.observer.OnEvent(Event{Type: EventHalted, Member: m.ID, Failures: o.Failures})
-			m.Stop()
+			m.stopLocked()
 		}
 	}
 }
@@ -177,7 +177,16 @@ func (m *Member) Status() raft.Status {
 	return m.node.Status()
 }
 
+// Stop waits for the event being handled, so a status published by that event can never
+// follow the stopped event and make a dead member look alive again.
 func (m *Member) Stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopLocked()
+}
+
+// stopLocked stops the member; the caller holds mu.
+func (m *Member) stopLocked() {
 	m.cancel()
 	logrus.Infof("Member %d: Stopped.", m.ID)
 	m.observer.OnEvent(Event{Type: EventStopped, Member: m.ID})
