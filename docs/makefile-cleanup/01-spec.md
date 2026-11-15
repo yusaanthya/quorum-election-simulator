@@ -2,7 +2,7 @@
 
 Status: converged after 5 convergent-spec rounds (Claude critic + Codex critic, both BLOCKING: none in round 5); owner gate answers recorded in section 6.
 
-Target repository: `/home/yusa1104/project/split-repo-test/quorum-election-simulator`
+Target repository: a local checkout of this repository
 Code under change: `Makefile` (only). Documentation: `docs/makefile-cleanup/` (owner decision D5).
 Date: 2026-10-27
 

@@ -2,7 +2,7 @@
 
 Status: converged after 2 convergent-spec plan rounds (Claude critic + Codex critic, both BLOCKING: none in round 2)
 Spec: `docs/makefile-cleanup/01-spec.md` (confirmed; gate decisions D1, D2, D3 = D3-a, D4, D5, D6 settled in spec section 6)
-Target repository: `/home/yusa1104/project/split-repo-test/quorum-election-simulator` (session cwd)
+Target repository: a local checkout of this repository (session cwd)
 Branch: `build/yusa_liu/makefile_cleanup` (existing, created from `origin/main` = `f3f5d80`)
 Date: 2026-10-27
 
