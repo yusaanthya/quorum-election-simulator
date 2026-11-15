@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -172,4 +173,21 @@ func TestStopWaitsForStatusInFlight(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("stopped was never published")
+}
+
+// A member stopped before Run must not announce itself as alive afterwards.
+func TestStopBeforeRunPublishesNoLiveStatus(t *testing.T) {
+	rec := &recordingObserver{}
+	var wg sync.WaitGroup
+	inbox := make(chan raft.Message, 1)
+	m := newMember(context.Background(), 0, NewMockTimer(time.Now()), NewDirectNetworker(map[int]chan raft.Message{0: inbox}), NewMockNotifier(), rec, []int{0}, inbox, &wg)
+
+	m.Stop()
+	wg.Add(1)
+	go m.Run()
+	wg.Wait()
+
+	if e, ok := rec.find(func(e Event) bool { return e.Type != EventStopped }); ok {
+		t.Fatalf("stopped member published %+v after its stopped event", e)
+	}
 }

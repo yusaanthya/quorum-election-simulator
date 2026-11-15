@@ -78,8 +78,11 @@ func (m *Member) Run() {
 	m.electionTimer = m.timer.NewTimer(timeout)
 	m.mu.Lock()
 	m.lastStatus = m.node.Status()
-	m.observer.OnEvent(statusEvent(m.lastStatus, true))
-	m.observer.OnEvent(Event{Type: EventElectionTimer, Member: m.ID, DurationMs: timeout.Milliseconds()})
+	// A member stopped before it started has already published stopped; stay silent.
+	if m.ctx.Err() == nil {
+		m.observer.OnEvent(statusEvent(m.lastStatus, true))
+		m.observer.OnEvent(Event{Type: EventElectionTimer, Member: m.ID, DurationMs: timeout.Milliseconds()})
+	}
 	m.mu.Unlock()
 
 	// Leader-only tickers, stopped until the node becomes leader
