@@ -66,8 +66,8 @@ merge: runner
 - `status`: `ready` or `hold`. Only `ready` items are selected.
 - `created`: ISO 8601 with offset. It sets the order.
 - `dependsOn`: optional list of item ids. An item is selectable only when the
-  pull request of every listed item (head `claude/item-<dep>`) is merged into
-  `main`.
+  pull request of every listed item (head `claude/item-<dep>` in this
+  repository) is merged into `main`.
 - `merge`: optional, `runner` (default) or `owner`. With `owner` the run opens
   the pull request and never merges it. Use it for items whose result needs a
   human look, such as visible changes to the page.
@@ -99,8 +99,9 @@ An item's Goal may name a plan file under `docs/`, for example
 
 The claim on an item is the remote branch `claude/item-<id>`, created at the
 base commit with one empty commit `chore: claim <id>`. An item is claimed when
-that branch exists or a pull request with that head branch exists in any
-state. A claim branch without a pull request is an orphaned claim.
+that branch exists in this repository or a pull request from that branch of
+this repository exists in any state. A branch or pull request of a fork never
+counts. A claim branch without a pull request is an orphaned claim.
 
 Order: oldest `created` first among valid, unclaimed, `ready` items whose
 `dependsOn` is satisfied.
@@ -117,9 +118,9 @@ Order: oldest `created` first among valid, unclaimed, `ready` items whose
    4. If rollout step R3 (section 9) is **Enabled**, tend open runner pull
       requests (section 6). If that merged one, fetch `main` again and record
       the new base.
-   5. List remote branches starting with `claude/item-` and pull requests
-      with such head branches. If there is an orphaned claim, or 3 or more
-      such pull requests are open, exit.
+   5. List this repository's branches starting with `claude/item-` and the
+      pull requests whose head is such a branch of this repository. If there
+      is an orphaned claim, or 3 or more such pull requests are open, exit.
 2. **Select** the first item in the order of section 2.3. None: exit, having
    written nothing.
 3. **Claim** (section 2.3) and push without force. A rejected push means
@@ -234,11 +235,20 @@ are listed in the body and not acted on.
 Applies only while rollout step R3 (section 9) is **Enabled**.
 
 A run takes **at most one** action that changes something, on the oldest open
-pull request whose head branch starts with `claude/item-` and whose base is
-`main`. Drafts and pull requests with a `[FAILED] ` or `[NEEDS-DECISION] `
-prefix are the owner's and are skipped; the run moves to the next oldest. The
-owner takes a pull request out of this section by converting it to a draft or
-adding the prefix.
+runner pull request. A pull request is a runner pull request only when all of
+these hold; anything else is never tended, fixed or merged by a run, whatever
+its branch is called:
+
+- Its base is `main` and its head branch is `claude/item-<id>` **in this
+  repository**. A pull request from a fork is never a runner pull request.
+- `.agent-line/queue/<id>.md` exists on `main` and is valid.
+- The oldest commit of `git log --first-parent <merge base>..<head>` is the
+  empty claim commit `chore: claim <id>` (section 2.3).
+
+Drafts and pull requests with a `[FAILED] ` or `[NEEDS-DECISION] ` prefix are
+the owner's and are skipped; the run moves to the next oldest. The owner takes
+a pull request out of this section by converting it to a draft or adding the
+prefix.
 
 Evidence, all read fresh for the current head SHA:
 
@@ -269,11 +279,13 @@ Actions, first match wins:
    the P0 and P1 findings of the trusted reviewer account named in
    [codex-review-gate.md](codex-review-gate.md) on the head. P2 and P3
    findings and every other comment are not acted on. The fix changes no
-   section 4.2 path. Run the full check, then one critic round. If either
-   fails, push nothing: prefix the title `[NEEDS-DECISION] ` and add "Review
-   fix failed: <check or critic item>." Otherwise commit with the trailer
-   `Review-fix-round: <n>`, append one line to `## Review fixes`, push without
-   force, and request a review (below). Stop tending.
+   section 4.2 path. Commit the fix locally with the trailer
+   `Review-fix-round: <n>`, so that the critic's diff includes it, then run
+   the full check and one critic round on that commit. If either fails, push
+   nothing and discard the local commit: prefix the title
+   `[NEEDS-DECISION] ` and add "Review fix failed: <check or critic item>."
+   Otherwise append one line to `## Review fixes`, push without force, and
+   request a review (below). Stop tending.
 4. **Update.** Every check passes but the head does not contain the current
    `main` commit. Merge `main` into the branch (a merge commit, never a
    rebase), run the full check, push without force, and request a review
