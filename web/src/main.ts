@@ -27,6 +27,8 @@ const stage = new Stage(document.getElementById("scene")!, {
   ambientOcclusion,
   scenery: (scene) => theme.build(scene),
   background: theme.background,
+  lighting: theme.lighting,
+  bloom: theme.bloom,
 });
 const state = new ClusterState();
 const packets = new PacketSystem(stage.scene, theme.keepClear);
@@ -53,7 +55,7 @@ function rebuild(n: number) {
   }
   packets.clear();
   beans = Array.from({ length: n }, (_, id) => {
-    const bean = new Mochi(id);
+    const bean = new Mochi(id, theme.memberLook);
     theme.dress?.(bean);
     const [x, z] = standAt(theme, id, n);
     bean.root.position.set(x, 0, z);

@@ -25,6 +25,8 @@ const stage = new Stage(document.getElementById("scene")!, {
   scenery: (scene) => theme.build(scene),
   background: theme.background,
   reserveHud: false,
+  lighting: theme.lighting,
+  bloom: theme.bloom,
 });
 if (theme === lineup && params.get("focus") === "leader") {
   stage.camera.position.set(0, 1.9, 3.4);
@@ -64,7 +66,7 @@ const members: MemberState[] = roles.map((r, id) => ({
   timerDurationMs: 6000,
 }));
 const mochis = members.map((m, i) => {
-  const mochi = new Mochi(m.id);
+  const mochi = new Mochi(m.id, theme.memberLook);
   theme.dress?.(mochi);
   theme.onRole?.(mochi, roles[i]);
   const [x, z] = standAt(theme, i, members.length);

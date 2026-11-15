@@ -37,7 +37,7 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: radial-gradient(120% 95% at 50% 40%, #ece7f3 0%, #cec5df 60%, #a69bc2 100%);
+  background: radial-gradient(120% 95% at 50% 40%, #2b1c30 0%, #150d1c 60%, #050308 100%);
 }
 
 #scene {

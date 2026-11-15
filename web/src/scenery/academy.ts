@@ -4,11 +4,11 @@ import { roundedCylinder } from "../scene/shapes";
 import { ball, matte, place, roundedBox, type Theme } from "./kit";
 import { mulberry32 } from "./random";
 
-const STONE = "#ddd5c9";
-const STONE_LIGHT = "#ece6dc";
-const SEAM = "#d3cabd";
-const WOOD = "#b59b8a";
-const BOOKS = ["#a3abcb", "#cfa7ab", "#abc4a8", "#e3d1a5", "#bba9d1", "#d9b9a0"];
+const STONE = "#48362d";
+const STONE_LIGHT = "#4d3b32";
+const SEAM = "#44332a";
+const WOOD = "#39251c";
+const BOOKS = ["#322a2e", "#432825", "#353124", "#4a3523", "#3b292f", "#462e22"];
 
 // Camera looks from +x/+z, so "behind the circle" is the opposite direction.
 const BACK = Math.atan2(15.5, 11) + Math.PI;
@@ -30,7 +30,15 @@ const floaters: { obj: THREE.Object3D; y: number; phase: number }[] = [];
 export const academy: Theme = {
   id: "academy",
   title: "A · 魔法學院的星詠圓桌",
-  background: ["#ece7f3", "#cec5df", "#a69bc2"],
+  background: ["#2b1c30", "#150d1c", "#050308"],
+  lighting: {
+    hemi: { sky: "#ffd6ad", ground: "#1a0f18", intensity: 0.55 },
+    key: { color: "#ffb478", intensity: 0.9 },
+    fill: { color: "#5d3c86", intensity: 0.3 },
+    exposure: 1.0,
+  },
+  bloom: 0.8,
+  memberLook: { lampHeight: 1.4, lampIntensity: 2, sigilGlow: 2.2, sigilInk: 0 },
   standRadius: STAND_MAX,
   // An odd cluster puts member 0 nearest the camera. An even one turns half a step, so it is
   // symmetric too, two members stand left and right rather than front and back, and nobody
@@ -54,10 +62,14 @@ export const academy: Theme = {
       place(scene, seam, 0, 0.003, 0, false);
     }
 
-    // Ornate rune circle of gold and silver light, straight on the pale stone.
-    const sigil = new Sigil(2.2, { scheme: "dawn", points: 6, seed: 3, glow: 1.1, ink: 1 });
+    // Ornate rune circle of gold and silver light, glowing on the dark stone.
+    const sigil = new Sigil(2.2, { scheme: "dawn", points: 6, seed: 3, glow: 2.0 });
     place(scene, sigil, 0, 0.022, 0, false);
     sigils.push(sigil);
+    // The circle also lights the members standing around it.
+    const circleLight = new THREE.PointLight("#ffb25a", 16, 9, 1.6);
+    circleLight.position.set(0, 0.7, 0);
+    scene.add(circleLight);
     const dust = new Motes(2.1, 2.4, 48);
     place(scene, dust, 0, 0.05, 0, false);
     motes.push(dust);
@@ -89,7 +101,7 @@ export const academy: Theme = {
       const a = BACK + (rand() - 0.5) * 3.4;
       const r = 3 + rand() * 2;
       const candle = new THREE.Group();
-      candle.add(new THREE.Mesh(roundedCylinder(0.07, 0.32, 0.03, 16), matte("#f2ece0")));
+      candle.add(new THREE.Mesh(roundedCylinder(0.07, 0.32, 0.03, 16), matte("#4f3d33")));
       const flame = ball("#ffdca3", 0.06, 1.4);
       flame.scale.y = 0.09;
       flame.position.y = 0.24;
@@ -120,7 +132,7 @@ function bookshelf(rand: () => number) {
   frame.position.y = h / 2;
   g.add(frame);
   // Recess for the shelves, slightly lighter.
-  const back = new THREE.Mesh(roundedBox(w - 0.18, h - 0.22, 0.05, 0.02), matte("#a48a7a"));
+  const back = new THREE.Mesh(roundedBox(w - 0.18, h - 0.22, 0.05, 0.02), matte("#332017"));
   back.position.set(0, h / 2, d / 2 - 0.02);
   g.add(back);
   for (let row = 0; row < 3; row++) {
