@@ -83,6 +83,22 @@ same limitation. Closing it needs a separate unprivileged workflow that
 listens to review events and a `workflow_run` trigger here, as ibanny-cafe's
 variant has.
 
+Stuck at `error` after a later commit, observed on #14 (2026-11-15): Codex's
+summary keeps counting a finding while its thread is still open on unchanged
+lines, but the adapter accepts only findings made on the head commit. When a
+later commit leaves an earlier finding's lines untouched, the head gets
+`error` ("Findings reported but severity could not be verified") even if
+Codex's review of the head is clean. Rerunning the gate does not clear it: it
+reads the same evidence. Ways out:
+
+- Change the lines the finding points at. The thread becomes outdated and
+  stops counting (seen in yusa-CV #33).
+- As the owner, remove `Codex Review Gate` from the ruleset's required checks,
+  merge, and add it back.
+
+Whether resolving the conversation clears it has not been verified. An agent
+must not resolve Codex's conversations to get past the gate.
+
 ## Validation
 
 Run `node --test scripts/*.test.mjs`, which includes
