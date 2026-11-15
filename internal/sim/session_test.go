@@ -139,3 +139,25 @@ func TestCloseWithoutStart(t *testing.T) {
 	s := New(Config{Members: 3}, func(core.Event) {})
 	s.Close() // Must not block
 }
+
+func TestClampMembers(t *testing.T) {
+	between := (MinMembers + MaxMembers) / 2
+	tests := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"below MinMembers", MinMembers - 1, MinMembers},
+		{"MinMembers", MinMembers, MinMembers},
+		{"between bounds", between, between},
+		{"MaxMembers", MaxMembers, MaxMembers},
+		{"above MaxMembers", MaxMembers + 1, MaxMembers},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clampMembers(tt.in); got != tt.want {
+				t.Errorf("clampMembers(%d) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
+	}
+}
