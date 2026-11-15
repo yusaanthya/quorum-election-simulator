@@ -60,6 +60,7 @@ export class Sigil extends THREE.Group {
   readonly materials: THREE.MeshBasicMaterial[] = [];
   private readonly inkMaterials: THREE.MeshBasicMaterial[] = [];
   private readonly ink: number;
+  private readonly geometry: THREE.PlaneGeometry;
 
   constructor(radius: number, opts: SigilOptions = {}) {
     super();
@@ -67,7 +68,7 @@ export class Sigil extends THREE.Group {
     const scheme = sigilSchemes[opts.scheme ?? "dawn"];
     const glow = new THREE.Color(1, 1, 1).multiplyScalar(opts.glow ?? 1.4);
     this.ink = opts.ink ?? 0;
-    const geo = new THREE.PlaneGeometry(radius * 2, radius * 2);
+    const geo = (this.geometry = new THREE.PlaneGeometry(radius * 2, radius * 2));
 
     [tex.rings, tex.stars].forEach((map, i) => {
       const layer = new THREE.Group();
@@ -110,8 +111,10 @@ export class Sigil extends THREE.Group {
     this.discs[1].rotation.z = -t * 0.08 * speed;
   }
 
+  /** Frees this circle's own geometry and materials; the cached textures are shared. */
   dispose() {
     for (const m of [...this.materials, ...this.inkMaterials]) m.dispose();
+    this.geometry.dispose();
   }
 }
 
