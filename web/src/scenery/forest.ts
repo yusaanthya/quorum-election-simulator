@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { Sigil } from "../scene/magic";
 import { roundedCylinder } from "../scene/shapes";
 import { arc, ball, grassRing, lathe, matte, place, puff, roundedBox, type Theme } from "./kit";
-import { mulberry32 } from "./random";
+import { mulberry32 } from "../scene/random";
 
 const EARTH = "#c9ae95";
 const MOSS = "#b4cda3";

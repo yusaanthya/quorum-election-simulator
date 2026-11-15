@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import type { Role } from "../sim/events";
-import type { Mochi } from "../scene/mochi";
+import type { MemberLook, Mochi } from "../scene/mochi";
+import type { Lighting } from "../scene/stage";
 
 /** A themed setting for the cluster: scenery plus how members dress for it. */
 export interface Theme {
@@ -17,25 +18,11 @@ export interface Theme {
   /** Builds the scenery; returns its outer radius. Called once. */
   build(scene: THREE.Scene): number;
   /** Scene lighting; absent keeps the stage's default daylight. */
-  lighting?: {
-    hemi: { sky: string; ground: string; intensity: number };
-    key: { color: string; intensity: number };
-    fill: { color: string; intensity: number };
-    exposure?: number;
-  };
+  lighting?: Lighting;
   /** Bloom strength; absent means no bloom pass. */
   bloom?: number;
   /** How members' lamp and floor sigils are tuned for this scene; absent keeps the defaults. */
-  memberLook?: {
-    /** Lamp light height over the head (default 0.5). */
-    lampHeight: number;
-    /** Lamp light intensity at full level (default 2). */
-    lampIntensity: number;
-    /** Glow of the campaign and leader sigils. */
-    sigilGlow: number;
-    /** Multiplier of the sigils' dark underlay. */
-    sigilInk: number;
-  };
+  memberLook?: MemberLook;
   /** Adds theme headwear to a member; called once per member. */
   dress?(m: Mochi): void;
   /** Per-frame animation of the scenery and accessories. */

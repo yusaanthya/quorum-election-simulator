@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { Sigil } from "../scene/magic";
 import { mochiGeometry, roundedCylinder } from "../scene/shapes";
 import { arc, ball, grassRing, lathe, matte, place, puff, roundedBox, type Theme } from "./kit";
-import { mulberry32 } from "./random";
+import { mulberry32 } from "../scene/random";
 
 const STONE = "#ebe5db";
 const STONE_SIDE = "#d8d0c4";

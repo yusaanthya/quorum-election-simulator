@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { Motes, Sigil } from "../scene/magic";
 import { roundedCylinder } from "../scene/shapes";
 import { ball, matte, place, roundedBox, type Theme } from "./kit";
-import { mulberry32 } from "./random";
+import { mulberry32 } from "../scene/random";
 
 const STONE = "#48362d";
 const STONE_LIGHT = "#4d3b32";

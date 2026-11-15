@@ -5,8 +5,15 @@ import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
-import type { Theme } from "../scenery/kit";
 import { CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
+
+/** Scene lighting: colors and intensities of the hemisphere, key and fill lights. */
+export interface Lighting {
+  hemi: { sky: string; ground: string; intensity: number };
+  key: { color: string; intensity: number };
+  fill: { color: string; intensity: number };
+  exposure?: number;
+}
 
 export interface StageOptions {
   ambientOcclusion: boolean;
@@ -17,7 +24,7 @@ export interface StageOptions {
   /** Shift the scene right on wide screens to leave room for the HUD (default true). */
   reserveHud?: boolean;
   /** Light colors and intensities; absent keeps the default daylight. */
-  lighting?: Theme["lighting"];
+  lighting?: Lighting;
   /** Bloom strength; absent means no bloom pass. */
   bloom?: number;
 }
@@ -139,7 +146,7 @@ export class Stage {
     this.labels.render(this.scene, this.camera);
   }
 
-  private addLights(l: Theme["lighting"] = DAYLIGHT) {
+  private addLights(l: Lighting = DAYLIGHT) {
     this.renderer.toneMappingExposure = l.exposure ?? 1.05;
     this.scene.add(new THREE.HemisphereLight(l.hemi.sky, l.hemi.ground, l.hemi.intensity));
 
