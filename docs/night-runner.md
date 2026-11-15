@@ -67,7 +67,13 @@ merge: runner
 - `created`: ISO 8601 with offset. It sets the order.
 - `dependsOn`: optional list of item ids. An item is selectable only when the
   pull request of every listed item (head `claude/item-<dep>` in this
-  repository) is merged into `main`.
+  repository) is merged into `main`. A dependency whose merge was later
+  reverted is not satisfied: if `main` holds, after that merge commit, a
+  commit whose message contains `Reverts yusaanthya/quorum-election-simulator#<n>`
+  for the dependency's pull request number, or whose title is `Revert "`
+  followed by that pull request's title, the dependent item is not selected
+  and the run summary names both. The owner then re-lands the work under a
+  new item and points `dependsOn` at it.
 - `merge`: optional, `runner` (default) or `owner`. With `owner` the run opens
   the pull request and never merges it. Use it for items whose result needs a
   human look, such as visible changes to the page.
