@@ -389,8 +389,8 @@ R2 is the owner's job, not a check the run makes.
 | Step | What it turns on | Status |
 | --- | --- | --- |
 | R0 | This file, the decisions and the `AGENTS.md` section are on `main` | Enabled |
-| R1 | The task exists with its schedule disabled; one supervised manual run with a small item | Enabled |
-| R2 | The schedule | Not started |
+| R1 | The task exists with its schedule disabled; one supervised manual run with a small item | Enabled (2026-11-15, pull request #23) |
+| R2 | The schedule | Enabled |
 | R3 | Section 6: tending and merging | Not started |
 
 ## Appendix A. Scheduled task prompt
