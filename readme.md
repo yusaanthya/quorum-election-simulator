@@ -214,8 +214,8 @@ the timer, and sends the vote requests in the returned order. `raft.Node` itself
 has no goroutines, randomness, timers, logging, or I/O.
 
 This boundary lets domain tests drive elections through direct method calls.
-Runtime tests exercise message delivery, timers, and member lifecycle. Detailed
-class diagrams, role transitions, and a failover sequence are in
+Runtime tests exercise message delivery, timers, and member lifecycle. The
+layers, the seams between them and the checks that enforce them are in
 [the architecture guide](docs/architecture.md).
 
 ### Election behavior
@@ -337,8 +337,8 @@ storage, log replication, and dynamic membership.
 
 ## Further reading
 
-- [Architecture guide](docs/architecture.md): layers, types, event flow, role
-  transitions, and a leader-failure example.
+- [Architecture guide](docs/architecture.md): layers, seams, run modes, role
+  transitions, and what enforces each rule.
 - [Refactor design](docs/refactor/02-spec.md): the move from member-owned rules
   to a pure Raft domain model.
 - [Makefile design](docs/makefile-cleanup/01-spec.md): build behavior and its

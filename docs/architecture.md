@@ -1,153 +1,112 @@
 # Architecture
 
-How the simulator is structured after the rich domain model refactor. The
-design notes behind it are in [`refactor/`](refactor/).
+How the code is layered, which seams connect the layers, and what checks each
+rule. It states rules and points at the code; read the code for types and
+fields. Build and run instructions are in the [readme](../readme.md).
 
-## 1. Layers
+## Go packages
 
-The domain layer (`internal/core/raft`) holds the Raft rules and knows nothing
-about goroutines, time, randomness, logging or transport. The runtime layer
-(`internal/core`) depends on it, never the reverse.
+Arrows are imports, as `go list` reports them (`cmd/wasm` with
+`GOOS=js GOARCH=wasm`).
 
 ```mermaid
 flowchart TB
-    subgraph service["internal/service"]
-        CLI["RunQuorumSetup / runQuorumCLI<br/>play · kill · restart · exit"]
-    end
-
-    subgraph core["internal/core — runtime layer"]
-        Q["Quorum<br/>create, start, stop, kill members"]
-        M["Member (one goroutine each)<br/>inbox · timers · apply outputs · logging"]
-        NET["DirectNetworker<br/>non-blocking inbox delivery"]
-        T["Timer<br/>RealTimer / MockTimer"]
-        N["QuorumEventNotifier"]
-    end
-
-    subgraph raft["internal/core/raft — domain layer (pure)"]
-        NODE["Node<br/>Raft state + rules"]
-        CL["Cluster<br/>size · Majority()"]
-        TYPES["Message · Role · Status · Output"]
-    end
-
-    CLI --> Q
-    Q -->|owns| M
-    M -->|On* events| NODE
-    NODE -->|outputs| M
-    M --> NET
-    M --> T
-    M --> N
-    NET -->|Inbox| M
-    NODE --> CL
-    NODE --> TYPES
+    main["cmd (main.go)"] --> cobra["internal/cobra"]
+    main --> logger["internal/logger"]
+    main --> config["internal/config"]
+    logger --> config
+    cobra --> config
+    cobra --> service["internal/service"]
+    cobra --> web["internal/web"]
+    cobra --> sim["internal/sim"]
+    wasm["cmd/wasm"] --> sim
+    wasm --> core["internal/core"]
+    web --> sim
+    web --> core
+    service --> core
+    sim --> core
+    core --> raft["internal/core/raft"]
 ```
 
-## 2. Types
+- `internal/core/raft` holds the election rules and state of one node. It
+  imports nothing: no goroutines, time, randomness, logging or transport.
+- `internal/core` runs a cluster: one goroutine per `Member`, timers, message
+  delivery, logging, and the event stream. It knows nothing about the CLI, the
+  browser or slow motion.
+- `internal/sim` keeps one cluster running for a viewer: slow motion,
+  simulated message latency, kill, restart, and restart after every member
+  stops. It knows nothing about HTTP or JavaScript.
+- `internal/web` exposes a `sim.Session` over HTTP and Server-Sent Events and
+  serves the front end embedded from `internal/web/dist`.
+- `cmd/wasm` exposes a `sim.Session` to JavaScript as `globalThis.quorumSim`.
+- `internal/service` is the interactive `play` command. It drives
+  `core.Quorum` directly and does not use `internal/sim`.
+- `internal/cobra` wires the `play`, `serve` and `version` commands;
+  `internal/config` and `internal/logger` hold the version and log setup.
+
+## Front end (`web/src`)
+
+Arrows are the imports the folder rule allows; each folder may also import
+from itself.
 
 ```mermaid
-classDiagram
-    direction LR
-
-    class Quorum {
-        -members map
-        -notifier QuorumEventNotifier
-        +Start()
-        +KillMember(id)
-        +Stop()
-        +Done() chan
-    }
-
-    class Member {
-        +ID int
-        +Inbox chan Message
-        -node Node
-        -electionTimer ITimer
-        -heartbeatTicker ITicker
-        -quorumCheckTicker ITicker
-        +Run()
-        +Status() Status
-        +Stop()
-        +IsAlive() bool
-        -handle(event)
-        -apply(outputs)
-    }
-
-    class Node {
-        -role Role
-        -term int
-        -votedFor int
-        -leaderID int
-        -electionFailures int
-        -halted bool
-        -votes set
-        -contacted set
-        +OnElectionTimeout() Output[]
-        +OnMessage(msg) Output[]
-        +OnHeartbeatTick() Output[]
-        +OnQuorumCheck() Output[]
-        +Status() Status
-    }
-
-    class Cluster {
-        -size int
-        +Majority() int
-    }
-
-    class Output {
-        <<interface>>
-    }
-
-    class Networker {
-        <<interface>>
-        +SendTo(msg, to)
-    }
-
-    Quorum "1" *-- "n" Member
-    Member "1" *-- "1" Node
-    Node *-- Cluster
-    Node ..> Output : returns
-    Member ..> Networker : sends via
+flowchart TB
+    entry["main.ts, concepts.ts (entry files)"] --> ui["ui/"]
+    entry --> scenery["scenery/"]
+    entry --> scene["scene/"]
+    entry --> simts["sim/"]
+    ui --> simts
+    scenery --> scene
+    scenery --> simts
+    scene --> simts
 ```
 
-`Output` is one of `Send`, `ResetElectionTimer`, `StopElectionTimer`,
-`StartHeartbeats`, `StopHeartbeats`, `BecameFollower`, `BecameLeader`,
-`StartedElection`, `VoteGranted`, `LostQuorum` or `Halted`.
+- `sim/` turns the event stream into cluster state and talks to the
+  simulation. It knows nothing about three.js or how anything is drawn.
+- `scene/` holds three.js building blocks that every theme shares: the stage,
+  members, packets, shapes, palette and seeded randomness.
+- `scenery/` holds the themes, each built from `scene/` parts.
+- `ui/` is the HTML overlay. It reads `sim/` state and reports user actions
+  through callbacks; it knows nothing about three.js.
+- `main.ts` (the visualizer) and `concepts.ts` (a development page that
+  compares themes) wire the folders together.
 
-## 3. How an event flows
+## Seams
 
-Every event follows the same path: the member takes its lock, asks the node
-what to do, and executes the answer in order. The node itself never sends,
-sleeps or logs.
+| Seam | Defined in | What it separates |
+| --- | --- | --- |
+| `raft.Output` | `internal/core/raft/output.go` | The node returns ordered decisions; `Member.apply` in `internal/core/member.go` executes them. |
+| `core.Timer` | `internal/core/timer.go` | Election timers and leader tickers. `RealTimer` and `MockTimer` (`internal/core/test_util.go`) implement it; `internal/sim` supplies its own for slow motion. |
+| `core.Networker` | `internal/core/quorum.go` | Message delivery. `DirectNetworker` writes to inbox channels without blocking. |
+| `core.Observer`, `core.Event` | `internal/core/observer.go` | Every observable change as one flat JSON record. It is the wire format the front end reads, mirrored in `web/src/sim/events.ts`. |
+| `SimSource` | `web/src/sim/source.ts` | Where events come from and where commands go: `ServerSource` or `WasmSource`. |
+| `Theme` | `web/src/scenery/kit.ts` | Scenery, lighting and member styling for one setting. |
 
-```mermaid
-sequenceDiagram
-    participant Src as Inbox / timer
-    participant M as Member
-    participant N as raft.Node
-    participant Net as DirectNetworker
-    participant Tm as Timers
+An event in a member follows one path: `Member.handle` takes the member's lock,
+calls one `raft.Node` method, executes the returned outputs in order, and
+reports a status event if the node's status changed.
 
-    Src->>M: message or tick
-    M->>M: lock mu, skip if stopped
-    M->>N: OnMessage / OnElectionTimeout / ...
-    N->>N: guard → change state
-    N-->>M: []Output
-    loop each output, in order
-        alt Send
-            M->>Net: SendTo(msg, msg.To)
-        else timer output
-            M->>Tm: Stop / Reset
-        else BecameLeader
-            M->>M: log + NotifyLeaderElected
-        else Halted
-            M->>M: log + Stop()
-        else other event
-            M->>M: log
-        end
-    end
-    M->>M: unlock mu
-```
+## Run modes
 
-## 4. Node roles
+Both modes run the same `internal/sim` and `internal/core` code and deliver the
+same JSON-encoded `core.Event` values to the same front end. Vite builds the
+front end once per mode (`web/vite.config.ts`); `main.ts` picks the source by
+build mode.
+
+- **Go server.** `serve` runs `web.Run` (`internal/web/serve.go`). The browser
+  reads `GET /api/events` as Server-Sent Events, starting with a snapshot of
+  the running cluster, and sends `POST /api/kill` and `POST /api/restart`.
+  `ServerSource` is the client.
+- **WebAssembly.** The static site on Cloudflare Pages loads `quorum.wasm`,
+  built from `cmd/wasm`, and the simulation runs in the tab. `WasmSource`
+  calls `quorumSim.start`, `kill` and `restart` and receives each event as a
+  JSON string.
+
+The `play` command uses neither: it logs to the terminal and emits no events.
+
+Planned work on a simulation clock is in [`sim-clock/`](sim-clock/).
+
+## Node roles
 
 ```mermaid
 stateDiagram-v2
@@ -167,25 +126,39 @@ stateDiagram-v2
 
 `Halted` is a flag (`Status.Halted`), not a `Role`: a halted node keeps its
 last role but ignores every event. A valid heartbeat or winning an election
-resets the failure count.
+resets the failure count. The rules are in `internal/core/raft/node.go`.
 
-## 5. Example: a leader is killed
+## Rules and what enforces them
 
-Five members; member 4 leads term 1 and is killed from the CLI.
+| Rule | Enforced by |
+| --- | --- |
+| `raft` does not import `core`, `sim` or `web`; `core` does not import `sim` or `web`; `sim` does not import `web`. | Compiler (each would be an import cycle) |
+| `raft` imports nothing else (no `time`, `math/rand`, `sync`, logging). | Review only |
+| No Go package imports a package above it in the diagram. | Review only |
+| `core.Event` JSON fields (and `omitempty` versus optional), `EventType` values, message kinds and roles match `web/src/sim/events.ts`. | `internal/core/event_contract_test.go` |
+| `web/src` folders import only in the directions of the front-end diagram. | `scripts/web-import-direction.test.mjs` |
+| `ServerSource` and `WasmSource` offer the same commands. | Compiler (`tsc`, both implement `SimSource`) |
+| `cmd/wasm`'s `quorumSim` matches `QuorumSimApi` in `web/src/sim/source.ts`, and `internal/web` routes match `ServerSource`. | Review only |
+| Every theme provides what `Theme` requires. | Compiler (`tsc`) |
+| `Observer` implementations are safe for concurrent use and never block. | Review only |
 
-```mermaid
-sequenceDiagram
-    participant CLI
-    participant L as Member 4 (leader)
-    participant F3 as Member 3
-    participant Fx as Members 0–2
+CI (`.github/workflows/ci.yml`) runs both tests: `go test -race ./...` and
+`node --test scripts/*.test.mjs`.
 
-    CLI->>L: kill 4 → Stop()
-    Note over L: context cancelled, no more heartbeats
-    Note over F3,Fx: election timers keep running (1.5–3 s)
-    F3->>F3: OnElectionTimeout → Candidate, term 2
-    F3->>Fx: RequestVote(term 2)
-    Fx-->>F3: VoteGranted (once per term)
-    F3->>F3: votes 3 ≥ Majority 3 → Leader
-    F3->>Fx: AppendEntries heartbeats every 500 ms
-```
+## Where to add things
+
+- **A theme.** Add a file under `web/src/scenery/` that exports a `Theme`,
+  built from `scene/` parts, and select it in `main.ts` or show it in
+  `concepts.ts`. A part that more than one theme needs goes in `scene/`.
+- **An event field or type.** Change `core.Event` or the constants in
+  `internal/core/observer.go`, emit it from `internal/core`, then mirror it in
+  `web/src/sim/events.ts`; the contract test fails until both sides agree.
+  Handle it in `web/src/sim/state.ts` or `main.ts`.
+- **A command from the UI.** Add a method to `sim.Session`
+  (`internal/sim/session.go`), a route in `internal/web/server.go`, a function
+  on `quorumSim` in `cmd/wasm/main.go`, and a method on `SimSource` with both
+  implementations in `web/src/sim/source.ts`. The UI reaches it through a
+  callback such as `HudActions` in `web/src/ui/hud.ts`, wired in `main.ts`.
+- **A Raft rule.** Change `internal/core/raft/node.go` and test it in
+  `node_test.go` without goroutines or sleeps. If the rule needs a new effect,
+  add an `Output` in `output.go` and execute it in `Member.apply`.
