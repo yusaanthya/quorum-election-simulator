@@ -1,3 +1,11 @@
 # Built visualizer, embedded by go:embed; only the placeholder is tracked
 /internal/web/dist/*
 !/internal/web/dist/.gitkeep
+
+# Local build outputs: `make all` writes to bin/; `app` is a stray local build name
+/bin/
+/app
+
+# Runtime log written by every start of the binary; only the placeholder is tracked
+/log/*
+!/log/.gitkeep
