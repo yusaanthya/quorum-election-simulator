@@ -75,7 +75,9 @@ function onEvent(e: SimEvent) {
   switch (e.type) {
     case "message": {
       const target = beans[e.peer];
-      if (target && e.message) {
+      // A hidden tab gets no animation frames, so packets spawned there would never
+      // expire and would all appear at once when the tab is shown again.
+      if (target && e.message && !document.hidden) {
         packets.spawn(e.message, e.granted, e.durationMs, bean.anchor(from), target.anchor(to), () => target.receive());
       }
       break;
