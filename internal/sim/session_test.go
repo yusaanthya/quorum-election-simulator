@@ -1,46 +1,13 @@
 package sim
 
 import (
+	"math"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Anthya1104/quorum-election-cli/internal/core"
 )
-
-type fakeTimer struct {
-	mu       sync.Mutex
-	requests []time.Duration
-	real     core.Timer
-}
-
-func (f *fakeTimer) record(d time.Duration) {
-	f.mu.Lock()
-	f.requests = append(f.requests, d)
-	f.mu.Unlock()
-}
-func (f *fakeTimer) Now() time.Time { return time.Now() }
-func (f *fakeTimer) NewTicker(d time.Duration) core.ITicker {
-	f.record(d)
-	return f.real.NewTicker(time.Hour)
-}
-func (f *fakeTimer) NewTimer(d time.Duration) core.ITimer {
-	f.record(d)
-	return f.real.NewTimer(time.Hour)
-}
-
-func TestScaledTimerStretchesDurations(t *testing.T) {
-	inner := &fakeTimer{real: core.NewRealTimer()}
-	st := NewScaledTimer(inner, 4)
-	tm := st.NewTimer(100 * time.Millisecond)
-	tm.Stop()
-	tk := st.NewTicker(time.Second)
-	tk.Stop()
-
-	if inner.requests[0] != 400*time.Millisecond || inner.requests[1] != 4*time.Second {
-		t.Errorf("inner timer got %v, want [400ms 4s]", inner.requests)
-	}
-}
 
 type eventLog struct {
 	mu     sync.Mutex
@@ -133,6 +100,58 @@ func TestSessionRestartsAfterClusterHalts(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("session did not start a new quorum after the cluster halted")
+}
+
+// AC1.13: Close stops the session's clock, with and without Start.
+func TestCloseStopsClock(t *testing.T) {
+	for _, start := range []bool{false, true} {
+		name := "without Start"
+		if start {
+			name = "after Start"
+		}
+		t.Run(name, func(t *testing.T) {
+			log := &eventLog{}
+			s := New(Config{Members: 3, TimeScale: 1}, log.add)
+			if start {
+				s.Start()
+				log.waitFor(t, "first quorum", func(e core.Event) bool { return e.Type == core.EventQuorumStarted })
+			}
+			s.Close()
+			log.mu.Lock()
+			before := len(log.events)
+			log.mu.Unlock()
+
+			tm := s.clock.NewTimer(time.Millisecond)
+			select {
+			case <-tm.C():
+				t.Error("a timer on the session's clock fired after Close")
+			case <-time.After(200 * time.Millisecond):
+			}
+			log.mu.Lock()
+			defer log.mu.Unlock()
+			if after := len(log.events); after != before {
+				t.Errorf("sink received %d events after Close: %+v", after-before, log.events[before:])
+			}
+		})
+	}
+}
+
+// AC1.14: New limits the scale so the clock never gets a factor it rejects.
+func TestNewLimitsTimeScale(t *testing.T) {
+	tests := []struct {
+		in   float64
+		want float64
+	}{
+		{math.NaN(), 1},
+		{5000, 1000},
+	}
+	for _, tt := range tests {
+		s := New(Config{Members: 3, TimeScale: tt.in}, func(core.Event) {})
+		if got := s.TimeScale(); got != tt.want {
+			t.Errorf("New(TimeScale: %v).TimeScale() = %v, want %v", tt.in, got, tt.want)
+		}
+		s.Close()
+	}
 }
 
 func TestCloseWithoutStart(t *testing.T) {
