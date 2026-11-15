@@ -59,7 +59,7 @@ export class Hud {
     root.innerHTML = `
       <section class="panel title-card">
         <header class="masthead">
-          <h1>Quorum<span>學院選舉</span></h1>
+          <h1>Quorum<span>Kitties</span></h1>
           <p class="subtitle">Raft leader election · 每位成員就是一個節點</p>
         </header>
         <div class="rule" aria-hidden="true"><i></i></div>

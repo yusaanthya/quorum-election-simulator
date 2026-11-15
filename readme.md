@@ -131,8 +131,13 @@ instead of talking to `serve`. It uses the same `internal/core` and
 ```sh
 make pages                      # builds web/dist-pages (Go and Node.js required)
 cd web && npx wrangler login    # once
-npm run deploy:pages            # rebuilds and uploads to the quorum-beans Pages project
+npm run deploy:pages            # rebuilds and uploads to the quorum-kitties Pages project
 ```
+
+Pushes to `main` deploy automatically through
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml), which needs the repository
+secrets `CLOUDFLARE_API_TOKEN` (Cloudflare Pages: Edit) and `CLOUDFLARE_ACCOUNT_ID`.
+Pull requests run the same checks without deploying. The manual command above still works.
 
 The hosted page accepts `?members=5&slowmo=3` in its URL. To preview the
 WebAssembly build locally, run `npm run dev:wasm` in `web/`.

@@ -1,5 +1,5 @@
 # Cloudflare Pages project for the in-browser (WebAssembly) build.
 # Deploy with `npm run deploy:pages` after `npx wrangler login`.
-name = "quorum-beans"
+name = "quorum-kitties"
 pages_build_output_dir = "dist-pages"
 compatibility_date = "2026-10-01"
