@@ -69,9 +69,8 @@ merge: runner
   pull request of every listed item (head `claude/item-<dep>` in this
   repository) is merged into `main`.
 - `merge`: optional, `runner` (default) or `owner`. With `owner` the run opens
-  the pull request and never merges it, even when nothing is unresolved. Use
-  it for items whose result the owner wants to see first, such as visible
-  changes to the page.
+  the pull request and never merges it. Use it for items whose result needs a
+  human look, such as visible changes to the page.
 - The body has exactly the three headings shown.
 
 A file that breaks any of these rules is invalid. An invalid item is never
@@ -90,13 +89,9 @@ An item's Goal may name a plan file under `docs/`, for example
   replaced by this procedure (decision 2026-11-15 "Plans run by the night
   runner"). A header such as "Draft round 3" or "Round: 2 (draft)" does not
   block the item; the queue item is the authorization.
-- A verification step or acceptance criterion the run cannot perform or
-  confirm (a manual look, a check that needs a person) is listed under
-  `## Unresolved` in the pull request body with the reason. It is never
-  reported as done, and it makes the outcome `needs-decision` (section 4.4):
-  the pull request waits for the owner and is never merged by a run. A plan's
-  own allowance to record a check as open for the owner covers finishing the
-  task, not merging.
+- A verification step the run cannot perform (a manual look, a check that
+  needs a person) is listed under `## Unresolved` in the pull request body
+  with the reason. It is never reported as done.
 - Release steps a plan assigns to the owner (version bump, tag, release
   notes) are not done by a run.
 
@@ -207,7 +202,7 @@ must answer for a `blocked` item, and is empty otherwise.
 | Outcome | When | Title prefix |
 | --- | --- | --- |
 | `failed` | the full check fails on the tip, or a fail-level path is in the diff | `[FAILED] ` |
-| `needs-decision` | the critic still has a blocking item after two rounds, the critic could not run, the report says `blocked`, or any required verification or acceptance criterion is listed under `## Unresolved` | `[NEEDS-DECISION] ` |
+| `needs-decision` | the critic still has a blocking item after two rounds, the critic could not run, or the report says `blocked` | `[NEEDS-DECISION] ` |
 | `no-op` | the report says `no-op` | none |
 | `done` | everything else | none |
 
@@ -299,8 +294,7 @@ Actions, first match wins:
    check>." This is not a fix round. Stop tending.
 5. **Merge.** `check` and `Codex Review Gate` are `success` on the head, the
    head contains the current `main` commit, no section 4.2 path is changed,
-   the body's `## Unresolved` section says "None.", and GitHub reports the
-   pull request mergeable. Read the head SHA and both
+   and GitHub reports the pull request mergeable. Read the head SHA and both
    results once more, then squash-merge with the pull request title as the
    commit title, passing that head SHA so a newer head refuses the merge. Add
    "Merged by the night runner at <UTC ISO 8601>." under `## Review fixes`.
@@ -343,9 +337,7 @@ runner").
 <rounds run; blocking items left, verbatim; non-blocking items>
 
 ## Unresolved
-<required verification or acceptance criteria not performed or confirmed, and
-why; open questions. Any entry here makes the outcome needs-decision. Write
-"None." when there is nothing>
+<verification not performed and why; open questions>
 
 ## Review fixes
 <added by later runs under section 6; empty when the pull request opens>
