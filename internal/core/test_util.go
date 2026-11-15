@@ -18,6 +18,7 @@ type MockTimerEntry struct {
 	isTicker bool
 	interval time.Duration
 	running  bool
+	f        func() // Set for AfterFunc entries
 }
 
 // MockTickerWrapper implements ITicker interface
@@ -117,9 +118,27 @@ func (m *MockTimer) NewTimer(d time.Duration) ITimer {
 	return &MockTimerWrapper{entry: entry, mt: m}
 }
 
-func (m *MockTimer) AdvanceTime(d time.Duration) {
+// AfterFunc registers f to be called once by AdvanceTime when d has passed.
+func (m *MockTimer) AfterFunc(d time.Duration, f func()) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.entries = append(m.entries, &MockTimerEntry{
+		deadline: m.currentTime.Add(d),
+		running:  true,
+		f:        f,
+	})
+}
+
+func (m *MockTimer) AdvanceTime(d time.Duration) {
+	m.mu.Lock()
+	var callbacks []func()
+	defer func() {
+		m.mu.Unlock()
+		// AfterFunc callbacks run outside the lock, so they may use the mock.
+		for _, f := range callbacks {
+			f()
+		}
+	}()
 
 	finalTime := m.currentTime.Add(d)
 
@@ -139,6 +158,11 @@ func (m *MockTimer) AdvanceTime(d time.Duration) {
 		}
 
 		if !entry.deadline.After(m.currentTime) {
+			if entry.f != nil {
+				entry.running = false
+				callbacks = append(callbacks, entry.f)
+				continue
+			}
 			// Trigger
 			select {
 			case entry.ch <- m.currentTime:

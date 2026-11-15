@@ -70,11 +70,12 @@ func (dn *DirectNetworker) SendTo(msg raft.Message, toMemberID int) {
 }
 
 // observedNetworker reports each message to the observer, then delivers it, after an
-// optional delay that simulates network latency.
+// optional delay on timer that simulates network latency.
 type observedNetworker struct {
 	inner    Networker
 	observer Observer
 	latency  func() time.Duration
+	timer    Timer
 }
 
 func (n *observedNetworker) Send(msg raft.Message) {
@@ -96,7 +97,7 @@ func (n *observedNetworker) SendTo(msg raft.Message, toMemberID int) {
 	}
 	// A message still in flight when its receiver stops lands in an inbox nobody reads, as
 	// on a real network. Sends never block, so this is safe after the quorum stops.
-	time.AfterFunc(delay, func() { n.inner.SendTo(msg, toMemberID) })
+	n.timer.AfterFunc(delay, func() { n.inner.SendTo(msg, toMemberID) })
 }
 
 type Quorum struct {
@@ -123,7 +124,7 @@ type Options struct {
 	// Observer receives every member's events; nil discards them.
 	Observer Observer
 	// Latency, if set, delays each message by the duration it returns, measured in
-	// wall-clock time. It must be safe for concurrent use.
+	// the timer's time. It must be safe for concurrent use.
 	Latency func() time.Duration
 }
 
@@ -155,7 +156,7 @@ func NewQuorumWithOptions(n int, timer Timer, opts Options) *Quorum {
 	}
 
 	// Phase 2: Create Lock-Free Networker, reporting each message before it is delivered
-	networker := &observedNetworker{inner: NewDirectNetworker(inboxes), observer: observer, latency: opts.Latency}
+	networker := &observedNetworker{inner: NewDirectNetworker(inboxes), observer: observer, latency: opts.Latency, timer: timer}
 
 	// Phase 3: Create Members with injected dependencies
 	allMemberIDs := make([]int, 0, n)

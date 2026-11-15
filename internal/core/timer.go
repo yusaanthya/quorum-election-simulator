@@ -23,6 +23,8 @@ type Timer interface {
 	Now() time.Time
 	NewTicker(d time.Duration) ITicker
 	NewTimer(d time.Duration) ITimer
+	// AfterFunc calls f once d of this timer's time has passed. f must not block.
+	AfterFunc(d time.Duration, f func())
 }
 
 // --- Real Implementation ---
@@ -59,4 +61,8 @@ func (r *RealTimer) NewTicker(d time.Duration) ITicker {
 
 func (r *RealTimer) NewTimer(d time.Duration) ITimer {
 	return &RealTimerWrapper{Timer: time.NewTimer(d)}
+}
+
+func (r *RealTimer) AfterFunc(d time.Duration, f func()) {
+	time.AfterFunc(d, f)
 }

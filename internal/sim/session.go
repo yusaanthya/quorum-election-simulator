@@ -138,16 +138,16 @@ func (s *Session) run() {
 	}
 }
 
-// latency picks a message delay, stretched like every other timer so that messages fly
-// slowly enough to follow.
+// latency picks a message delay in simulated time; the clock stretches it like every
+// other timer so that messages fly slowly enough to follow.
 func (s *Session) latency() time.Duration {
-	d := minLatency + time.Duration(rand.Int63n(int64(maxLatency-minLatency)))
-	return time.Duration(float64(d) * s.scale)
+	return minLatency + time.Duration(rand.Int63n(int64(maxLatency-minLatency)))
 }
 
-// emit scales timer durations to wall-clock time so a viewer can draw countdowns.
+// emit scales timer and message durations to wall-clock time so a viewer can draw
+// countdowns and packet flights.
 func (s *Session) emit(e core.Event) {
-	if e.Type == core.EventElectionTimer {
+	if e.Type == core.EventElectionTimer || e.Type == core.EventMessage {
 		e.DurationMs = int64(float64(e.DurationMs) * s.scale)
 	}
 	s.sink(e)
