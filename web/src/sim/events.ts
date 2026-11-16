@@ -12,7 +12,8 @@ export type EventType =
   | "became_follower"
   | "lost_quorum"
   | "halted"
-  | "stopped";
+  | "stopped"
+  | "clock";
 
 export type MessageKind = "request_vote" | "vote_reply" | "heartbeat" | "heartbeat_reply";
 
@@ -34,6 +35,11 @@ export interface SimEvent {
   halted: boolean;
   alive: boolean;
   contacted: number;
+  /** Simulated milliseconds: the timeout for "election_timer", the delivery delay for "message". */
   durationMs: number;
   members: number;
+  /** "clock": whether the simulation clock is paused. */
+  paused: boolean;
+  /** "clock": the chosen factor (wall time per simulated time). */
+  timeScale: number;
 }

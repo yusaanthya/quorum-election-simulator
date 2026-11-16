@@ -17,6 +17,9 @@ interface Packet {
   to: THREE.Vector3;
   /** Sideways offset at mid-flight, to pass around the centerpiece. */
   swerve: THREE.Vector3;
+  /** Simulated milliseconds when the packet left. */
+  start: number;
+  /** Seconds since start, in simulated time. */
   age: number;
   duration: number;
   style: Style;
@@ -77,8 +80,19 @@ export class PacketSystem {
     };
   }
 
-  /** Launches a message; it lands after durationMs, the delay the simulation applies to it. */
-  spawn(kind: MessageKind, granted: boolean, durationMs: number, from: THREE.Vector3, to: THREE.Vector3, onArrive?: () => void) {
+  /**
+   * Launches a message that left at startMs; it lands durationMs later, the delay the
+   * simulation applies to it. Both are on the time base later passed to update.
+   */
+  spawn(
+    kind: MessageKind,
+    granted: boolean,
+    durationMs: number,
+    from: THREE.Vector3,
+    to: THREE.Vector3,
+    startMs: number,
+    onArrive?: () => void,
+  ) {
     const key = kind === "vote_reply" ? (granted ? "vote_yes" : "vote_no") : kind;
     const style = this.styles[key];
     if (!style) return;
@@ -88,7 +102,7 @@ export class PacketSystem {
     obj.scale.setScalar(0);
     this.scene.add(obj);
     const duration = durationMs > 0 ? durationMs / 1000 : style.duration;
-    this.packets.push({ obj, from: from.clone(), to: to.clone(), swerve: this.swerve(from, to), age: 0, duration, style, onArrive });
+    this.packets.push({ obj, from: from.clone(), to: to.clone(), swerve: this.swerve(from, to), start: startMs, age: 0, duration, style, onArrive });
   }
 
   /**
@@ -120,10 +134,11 @@ export class PacketSystem {
     this.packets.length = 0;
   }
 
-  update(dt: number, camera: THREE.Camera) {
+  /** Places every packet at nowMs, on the same time base as the starts given to spawn. */
+  update(nowMs: number, camera: THREE.Camera) {
     for (let i = this.packets.length - 1; i >= 0; i--) {
       const p = this.packets[i];
-      p.age += dt;
+      p.age = (nowMs - p.start) / 1000;
       const k = Math.min(1, p.age / p.duration);
       const e = easeInOut(k);
       const dist = p.from.distanceTo(p.to);

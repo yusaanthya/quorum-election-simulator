@@ -6,6 +6,9 @@ export interface SimSource {
   connect(onEvent: (e: SimEvent) => void, onStatus: (connected: boolean) => void): Promise<void>;
   kill(id: number): void;
   restart(members?: number): void;
+  pause(): void;
+  resume(): void;
+  setTimeScale(scale: number): void;
 }
 
 export interface SourceOptions {
@@ -31,6 +34,18 @@ export class ServerSource implements SimSource {
   restart(members?: number) {
     void post("/api/restart", members ? { members } : undefined);
   }
+
+  pause() {
+    void post("/api/pause");
+  }
+
+  resume() {
+    void post("/api/resume");
+  }
+
+  setTimeScale(scale: number) {
+    void post("/api/timescale", { timeScale: scale });
+  }
 }
 
 async function post(path: string, body?: unknown) {
@@ -49,6 +64,9 @@ interface QuorumSimApi {
   start(opts: SourceOptions, onEvent: (json: string) => void): void;
   kill(id: number): void;
   restart(members: number): void;
+  pause(): void;
+  resume(): void;
+  setTimeScale(scale: number): void;
 }
 
 declare global {
@@ -89,6 +107,18 @@ export class WasmSource implements SimSource {
 
   restart(members?: number) {
     this.api?.restart(members ?? 0);
+  }
+
+  pause() {
+    this.api?.pause();
+  }
+
+  resume() {
+    this.api?.resume();
+  }
+
+  setTimeScale(scale: number) {
+    this.api?.setTimeScale(scale);
   }
 }
 

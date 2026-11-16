@@ -3,11 +3,15 @@ import type { ClusterState, MemberState } from "../sim/state";
 export interface HudActions {
   restart(members?: number): void;
   killLeader(): void;
+  pause(): void;
+  resume(): void;
+  setTimeScale(scale: number): void;
 }
 
 type Tone = "info" | "vote" | "good" | "bad";
 
 const MEMBER_CHOICES = [3, 5, 7];
+const SCALE_CHOICES = [1, 2, 3, 5, 10, 20];
 const FEED_LIMIT = 6;
 const PHONE = "(max-width: 640px)";
 
@@ -49,13 +53,17 @@ export class Hud {
   private readonly legend: HTMLElement;
   private readonly sizeButtons: HTMLButtonElement[] = [];
   private readonly killLeaderBtn: HTMLButtonElement;
+  private readonly scaleButtons: HTMLButtonElement[] = [];
+  private readonly pauseBtn: HTMLButtonElement;
   private readonly feedToggle: HTMLButtonElement;
   private readonly legendToggle: HTMLButtonElement;
   private readonly sourceText: HTMLElement;
   private readonly sourceLabel: string;
   private lastKey = "";
+  /** The paused state of the last clock event; the pause button acts on it. */
+  private paused = false;
 
-  constructor(root: HTMLElement, sourceLabel: string, timeScale: number | null, actions: HudActions) {
+  constructor(root: HTMLElement, sourceLabel: string, actions: HudActions) {
     root.innerHTML = `
       <section class="panel title-card">
         <header class="masthead">
@@ -78,6 +86,14 @@ export class Hud {
           <span class="spacer"></span>
           <button type="button" class="btn" data-action="restart">重新開局</button>
           <button type="button" class="btn btn-primary" data-action="kill-leader">讓隊長下線</button>
+        </div>
+        <div class="controls">
+          <span class="ctl-label" aria-hidden="true">慢動作</span>
+          <div class="segmented" role="group" aria-label="慢動作">
+            ${SCALE_CHOICES.map((n) => `<button type="button" data-scale="${n}">${n}×</button>`).join("")}
+          </div>
+          <span class="spacer"></span>
+          <button type="button" class="btn" data-action="pause" aria-pressed="false">暫停</button>
         </div>
         <p class="conn" data-k="conn"><i></i><span data-k="source"></span></p>
       </section>
@@ -122,7 +138,7 @@ export class Hud {
     this.legend = q("legend");
     this.sourceText = q("source");
     this.sourceLabel = sourceLabel;
-    this.setTimeScale(timeScale);
+    this.sourceText.textContent = sourceLabel; // Until the first clock event
 
     root.querySelectorAll<HTMLButtonElement>("[data-n]").forEach((b) => {
       this.sizeButtons.push(b);
@@ -131,6 +147,15 @@ export class Hud {
     root.querySelector('[data-action="restart"]')!.addEventListener("click", () => actions.restart());
     this.killLeaderBtn = root.querySelector('[data-action="kill-leader"]')!;
     this.killLeaderBtn.addEventListener("click", () => actions.killLeader());
+
+    // The clock controls change nothing here on click: the HUD follows clock events only,
+    // so every viewer of a shared session shows the same state.
+    root.querySelectorAll<HTMLButtonElement>("[data-scale]").forEach((b) => {
+      this.scaleButtons.push(b);
+      b.addEventListener("click", () => actions.setTimeScale(Number(b.dataset.scale)));
+    });
+    this.pauseBtn = root.querySelector('[data-action="pause"]')!;
+    this.pauseBtn.addEventListener("click", () => (this.paused ? actions.resume() : actions.pause()));
 
     // The feed starts collapsed to its latest line on phones; the legend is a pop-up there.
     this.feedToggle = root.querySelector('[data-action="feed"]')!;
@@ -150,8 +175,13 @@ export class Hud {
     this.legendToggle.setAttribute("aria-expanded", String(open));
   }
 
-  setTimeScale(scale: number | null) {
-    this.sourceText.textContent = scale ? `${this.sourceLabel} · 慢動作 ${scale}x` : this.sourceLabel;
+  /** Shows the state of a clock event. */
+  setClock(paused: boolean, timeScale: number) {
+    this.paused = paused;
+    this.pauseBtn.textContent = paused ? "繼續" : "暫停";
+    this.pauseBtn.setAttribute("aria-pressed", String(paused));
+    this.scaleButtons.forEach((b) => b.classList.toggle("active", Number(b.dataset.scale) === timeScale));
+    this.sourceText.textContent = `${this.sourceLabel}${paused ? " · 已暫停" : ""} · 慢動作 ${timeScale}x`;
   }
 
   setConnected(connected: boolean) {

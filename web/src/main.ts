@@ -8,6 +8,7 @@ import { Sparkles } from "./scene/sparkles";
 import { Stage } from "./scene/stage";
 import { academy } from "./scenery/academy";
 import { standAt, type Theme } from "./scenery/kit";
+import { SimClock } from "./sim/clock";
 import type { Role, SimEvent } from "./sim/events";
 import { ServerSource, WasmSource, type SimSource } from "./sim/source";
 import { ClusterState } from "./sim/state";
@@ -15,7 +16,7 @@ import { Hud } from "./ui/hud";
 
 const params = new URLSearchParams(location.search);
 const wasmMode = import.meta.env.MODE === "wasm";
-const timeScale = clampNumber(params.get("slowmo"), 1, 10, 3);
+const timeScale = clampNumber(params.get("slowmo"), 1, 20, 3);
 const source: SimSource = wasmMode
   ? new WasmSource({ members: clampNumber(params.get("members"), 1, 9, 5), timeScale })
   : new ServerSource();
@@ -31,18 +32,23 @@ const stage = new Stage(document.getElementById("scene")!, {
   bloom: theme.bloom,
 });
 const state = new ClusterState();
+/** Simulated time for countdown rings and packet flights; everything else runs on wall time. */
+const simClock = new SimClock();
 const packets = new PacketSystem(stage.scene, theme.keepClear);
 const sparkles = new Sparkles(stage.scene);
 let beans: Mochi[] = [];
 /** The role each member last showed, so the theme hears about changes once. */
 let shownRoles: (Role | "Down" | null)[] = [];
 
-const hud = new Hud(document.getElementById("hud")!, source.label, wasmMode ? timeScale : null, {
+const hud = new Hud(document.getElementById("hud")!, source.label, {
   restart: (n) => source.restart(n),
   killLeader: () => {
     const leader = state.leader;
     if (leader) source.kill(leader.id);
   },
+  pause: () => source.pause(),
+  resume: () => source.resume(),
+  setTimeScale: (scale) => source.setTimeScale(scale),
 });
 
 const from = new THREE.Vector3();
@@ -66,7 +72,15 @@ function rebuild(n: number) {
 }
 
 function onEvent(e: SimEvent) {
-  if (state.apply(e, performance.now())) {
+  // Integrate the time up to this event under the clock state that was in force, so the
+  // event is stamped with the mirror's time at its receipt, also in a hidden tab.
+  simClock.advance(performance.now());
+  if (e.type === "clock") {
+    simClock.apply(e);
+    hud.setClock(e.paused, e.timeScale);
+    return;
+  }
+  if (state.apply(e, simClock.now)) {
     rebuild(state.size);
     hud.log(`新的一局：${e.members} 位成員`, "good");
     return;
@@ -80,7 +94,7 @@ function onEvent(e: SimEvent) {
       // A hidden tab gets no animation frames, so packets spawned there would never
       // expire and would all appear at once when the tab is shown again.
       if (target && e.message && !document.hidden) {
-        packets.spawn(e.message, e.granted, e.durationMs, bean.anchor(from), target.anchor(to), () => target.receive());
+        packets.spawn(e.message, e.granted, e.durationMs, bean.anchor(from), target.anchor(to), simClock.now, () => target.receive());
       }
       break;
     }
@@ -150,7 +164,7 @@ function renderLoop(time?: number) {
   timer.update(time);
   const dt = Math.min(timer.getDelta(), 0.1);
   const t = timer.getElapsed();
-  const now = performance.now();
+  simClock.advance(performance.now());
   stage.update();
   theme.animate?.(t, dt);
   beans.forEach((b, i) => {
@@ -161,19 +175,12 @@ function renderLoop(time?: number) {
       shownRoles[i] = role;
       theme.onRole?.(b, role);
     }
-    b.update(dt, t, m, now, stage.camera.position, !state.leader);
+    b.update(dt, t, m, simClock.now, stage.camera.position, !state.leader);
   });
-  packets.update(dt, stage.camera);
+  packets.update(simClock.now, stage.camera);
   sparkles.update(dt);
   hud.update(state);
   stage.render();
-}
-
-if (!wasmMode) {
-  fetch("/api/config")
-    .then((r) => r.json())
-    .then((cfg: { timeScale: number }) => hud.setTimeScale(cfg.timeScale))
-    .catch(() => {});
 }
 
 source
