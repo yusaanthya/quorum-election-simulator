@@ -101,7 +101,7 @@ Then open <http://localhost:8080>. Flags:
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--addr` | `:8080` | Address to listen on |
-| `--slowmo` | `3` | Multiplies every timer and message delay so elections are easy to follow; `1` is real time |
+| `--slowmo` | `3` | Initial slow-motion factor for every timer and message delay, so elections are easy to follow; clamped to 1–20 and adjustable from the page; `1` is real time |
 | `--members`, `-m` | `3` | Initial member count (1–9) |
 
 The visualizer adds a simulated one-way message delay of 180–260 ms (before
@@ -139,7 +139,7 @@ Pushes to `main` deploy automatically through
 secrets `CLOUDFLARE_API_TOKEN` (Cloudflare Pages: Edit) and `CLOUDFLARE_ACCOUNT_ID`.
 Pull requests run the same checks without deploying. The manual command above still works.
 
-The hosted page accepts `?members=5&slowmo=3` in its URL. To preview the
+The hosted page accepts `?members=5&slowmo=3` in its URL (`slowmo` from 1 to 20). To preview the
 WebAssembly build locally, run `npm run dev:wasm` in `web/`.
 
 ## Architecture

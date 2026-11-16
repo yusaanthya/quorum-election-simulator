@@ -16,6 +16,10 @@ const (
 	MinMembers = 1
 	MaxMembers = 9
 
+	// Range of the chosen factor (wall time divided by simulated time).
+	MinTimeScale = 1
+	MaxTimeScale = 20
+
 	// restartDelay is how long a fully halted cluster stays on screen, in unscaled time.
 	restartDelay = 2 * time.Second
 
@@ -28,8 +32,8 @@ const (
 // Config sets up a Session.
 type Config struct {
 	Members int
-	// TimeScale multiplies every timer: 3 means elections run three times slower.
-	// Values below 1 and NaN are treated as 1, values above 1000 as 1000.
+	// TimeScale is the initial chosen factor: 3 means elections run three times slower.
+	// It is clamped to 1-20; NaN is treated as 1.
 	TimeScale float64
 }
 
@@ -37,12 +41,15 @@ type Config struct {
 type Session struct {
 	sink  func(core.Event)
 	clock *Clock // Every timer, message delivery and restart delay of the session
-	scale float64
 
+	// mu guards the fields below. It is never held while a quorum or member lock is
+	// acquired; the observer runs under a member lock and may take it.
 	mu      sync.Mutex
 	members int
 	quorum  *core.Quorum
 	closed  bool
+	paused  bool
+	scale   float64 // Chosen factor
 
 	restart chan int // New member count
 	started bool
@@ -52,13 +59,7 @@ type Session struct {
 
 // New creates a Session. sink receives events from many goroutines and must not block.
 func New(cfg Config, sink func(core.Event)) *Session {
-	scale := cfg.TimeScale
-	if !(scale >= 1) { // Also catches NaN
-		scale = 1
-	}
-	if scale > maxFactor { // The clock rejects a larger factor
-		scale = maxFactor
-	}
+	scale := clampTimeScale(cfg.TimeScale)
 	return &Session{
 		sink:    sink,
 		clock:   NewClock(scale),
@@ -70,7 +71,8 @@ func New(cfg Config, sink func(core.Event)) *Session {
 	}
 }
 
-// Start runs the session in a new goroutine until Close.
+// Start runs the session in a new goroutine until Close. The first event the sink
+// receives is a clock event with the state at that moment.
 func (s *Session) Start() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -78,11 +80,64 @@ func (s *Session) Start() {
 		return
 	}
 	s.started = true
+	s.sink(s.clockEventLocked())
 	go s.run()
 }
 
-// TimeScale reports the slow-motion factor applied to every timer.
-func (s *Session) TimeScale() float64 { return s.scale }
+// TimeScale reports the chosen factor.
+func (s *Session) TimeScale() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.scale
+}
+
+// Pause stops simulated time. While running it emits a clock event, also when the
+// session is already paused.
+func (s *Session) Pause() {
+	s.changeClock(func() {
+		s.paused = true
+		s.clock.Pause()
+	})
+}
+
+// Resume continues simulated time. While running it emits a clock event, also when the
+// session is not paused.
+func (s *Session) Resume() {
+	s.changeClock(func() {
+		s.paused = false
+		s.clock.Resume()
+	})
+}
+
+// SetTimeScale sets the chosen factor, clamped to [MinTimeScale, MaxTimeScale] with NaN
+// treated as MinTimeScale. While paused it takes effect on resume. While running it emits
+// a clock event, also when the factor does not change.
+func (s *Session) SetTimeScale(scale float64) {
+	scale = clampTimeScale(scale)
+	s.changeClock(func() {
+		s.scale = scale
+		s.clock.SetFactor(scale)
+	})
+}
+
+// changeClock applies change and announces the new state in one critical section of
+// s.mu, so clock events reach the sink in the order the changes were applied. Before
+// Start it emits nothing; once Close has begun it does nothing.
+func (s *Session) changeClock(change func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	change()
+	if s.started {
+		s.sink(s.clockEventLocked())
+	}
+}
+
+func (s *Session) clockEventLocked() core.Event {
+	return core.Event{Type: core.EventClock, Paused: s.paused, TimeScale: s.scale}
+}
 
 func (s *Session) run() {
 	defer close(s.stopped)
@@ -93,7 +148,7 @@ func (s *Session) run() {
 		q := core.NewQuorumWithOptions(s.members, s.clock, core.Options{
 			Observer: core.ObserverFunc(func(e core.Event) {
 				if !retired.Load() {
-					s.emit(e)
+					s.sink(e)
 				}
 			}),
 			Latency: s.latency,
@@ -139,18 +194,10 @@ func (s *Session) run() {
 }
 
 // latency picks a message delay in simulated time; the clock stretches it like every
-// other timer so that messages fly slowly enough to follow.
+// other timer so that messages fly slowly enough to follow. Events report it, like
+// election timeouts, in simulated milliseconds.
 func (s *Session) latency() time.Duration {
 	return minLatency + time.Duration(rand.Int63n(int64(maxLatency-minLatency)))
-}
-
-// emit scales timer and message durations to wall-clock time so a viewer can draw
-// countdowns and packet flights.
-func (s *Session) emit(e core.Event) {
-	if e.Type == core.EventElectionTimer || e.Type == core.EventMessage {
-		e.DurationMs = int64(float64(e.DurationMs) * s.scale)
-	}
-	s.sink(e)
 }
 
 // Kill stops one member, as the CLI's kill command does.
@@ -183,16 +230,19 @@ func (s *Session) Restart(members int) {
 	}
 }
 
-// Snapshot describes the running cluster: a quorum_started event followed by one
-// status event per member.
+// Snapshot describes the running cluster: a quorum_started event, one status event per
+// member, and a clock event last. Before the first cluster exists it is the clock event
+// alone. The quorum and the clock state are read together; the member statuses after.
 func (s *Session) Snapshot() []core.Event {
 	s.mu.Lock()
 	q := s.quorum
+	clock := s.clockEventLocked()
 	s.mu.Unlock()
 	if q == nil {
-		return nil
+		return []core.Event{clock}
 	}
-	return append([]core.Event{{Type: core.EventQuorumStarted, Members: q.Size()}}, q.Snapshot()...)
+	out := append([]core.Event{{Type: core.EventQuorumStarted, Members: q.Size()}}, q.Snapshot()...)
+	return append(out, clock)
 }
 
 // Close stops the cluster, waits for the session goroutine to exit, then stops the clock.
@@ -211,6 +261,16 @@ func (s *Session) Close() {
 	}
 	// Last step: drop in-flight messages of the stopped cluster and every pending timer.
 	s.clock.Stop()
+}
+
+func clampTimeScale(scale float64) float64 {
+	if !(scale >= MinTimeScale) { // Also catches NaN
+		return MinTimeScale
+	}
+	if scale > MaxTimeScale {
+		return MaxTimeScale
+	}
+	return scale
 }
 
 func clampMembers(n int) int {
