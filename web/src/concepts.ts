@@ -99,7 +99,7 @@ function renderLoop(time?: number) {
   stage.update();
   theme.animate?.(t, dt);
   // Freeze the countdown rings partway so the still shows them.
-  mochis.forEach((m, i) => m.update(dt, t, members[i], now + 1500, stage.camera.position));
+  mochis.forEach((m, i) => m.update(dt, t, members[i], now + 1500, stage.camera.position, true));
   packets.update(dt, stage.camera);
   stage.render();
 }
