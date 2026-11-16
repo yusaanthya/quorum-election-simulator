@@ -165,7 +165,8 @@ const shared = {
 
 const sleepyTint = new THREE.Color(palette.sleepy);
 const white = new THREE.Color(0xffffff);
-const TRACK_OPACITY = 0.4;
+/** Pushes the arc above the bloom threshold so themes with bloom light it softly. */
+const TIMER_GLOW = 1.4;
 const timerFull = new THREE.Color(palette.timerFull);
 const timerLow = new THREE.Color(palette.timerLow);
 
@@ -186,8 +187,6 @@ export class Mochi {
   private readonly light: THREE.PointLight;
   private readonly timerRing: THREE.Mesh;
   private readonly timerMat: THREE.MeshBasicMaterial;
-  private readonly trackRing: THREE.Mesh;
-  private readonly trackMat: THREE.MeshBasicMaterial;
   private readonly campaignSigil: Sigil;
   private readonly leaderSigil: Sigil;
   private readonly label: HTMLDivElement;
@@ -248,16 +247,12 @@ export class Mochi {
     this.root.add(this.light);
 
     // Floor: election countdown ring, and sigils for campaigning and leading.
-    this.trackMat = new THREE.MeshBasicMaterial({ color: palette.timerTrack, transparent: true, opacity: 0, depthWrite: false });
-    this.trackRing = new THREE.Mesh(shared.ring, this.trackMat);
-    this.timerMat = new THREE.MeshBasicMaterial({ color: palette.timerFull, transparent: true, opacity: 0, depthWrite: false });
+    this.timerMat = new THREE.MeshBasicMaterial({ color: palette.timerFull, transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
     this.timerRing = new THREE.Mesh(shared.ring.clone(), this.timerMat);
-    for (const [ring, y] of [[this.trackRing, 0.052], [this.timerRing, 0.054]] as const) {
-      ring.rotation.x = -Math.PI / 2;
-      ring.rotation.z = Math.PI / 2;
-      ring.position.y = y;
-      this.root.add(ring);
-    }
+    this.timerRing.rotation.x = -Math.PI / 2;
+    this.timerRing.rotation.z = Math.PI / 2;
+    this.timerRing.position.y = 0.054;
+    this.root.add(this.timerRing);
     this.campaignSigil = new Sigil(0.95, { scheme: "moon", simple: true, points: 5, seed: 1, ink: 0.55 * (look?.sigilInk ?? 1), ...(look && { glow: look.sigilGlow }) });
     this.leaderSigil = new Sigil(1.05, { scheme: "sun", simple: true, points: 6, seed: 0, ink: 0.5 * (look?.sigilInk ?? 1), ...(look && { glow: look.sigilGlow }) });
     for (const s of [this.campaignSigil, this.leaderSigil]) {
@@ -291,7 +286,6 @@ export class Mochi {
     this.bodyMat.map?.dispose();
     this.bodyMat.dispose();
     this.timerMat.dispose();
-    this.trackMat.dispose();
     this.timerRing.geometry.dispose();
     for (const s of [this.campaignSigil, this.leaderSigil]) s.dispose();
   }
@@ -365,13 +359,11 @@ export class Mochi {
     const show = alive && m.role === "Follower" && m.timerStart !== null && noLeader;
     this.countdown = damp(this.countdown, show ? 1 : 0, 12, dt);
     const visible = this.countdown > 0.01;
-    this.trackRing.visible = visible;
     this.timerRing.visible = visible && fraction > 0;
     if (visible) {
-      this.trackMat.opacity = this.countdown * TRACK_OPACITY;
       this.timerMat.opacity = this.countdown * 0.95;
       this.timerRing.geometry.setDrawRange(0, Math.ceil(fraction * TIMER_SEGMENTS) * 6);
-      this.timerMat.color.copy(timerLow).lerp(timerFull, fraction);
+      this.timerMat.color.copy(timerLow).lerp(timerFull, fraction).multiplyScalar(TIMER_GLOW);
     }
   }
 

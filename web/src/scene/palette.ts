@@ -12,7 +12,6 @@ export const palette = {
 
   timerFull: "#6fe0a0",
   timerLow: "#ff6b4a",
-  timerTrack: "#ffffff",
   candidateGlow: "#f3dfa6",
 
   envelope: "#f6efe2",
