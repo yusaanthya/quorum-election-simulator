@@ -613,3 +613,113 @@ func TestClockDoesNotWaitForCallbacks(t *testing.T) {
 		returnsWithin(t, "Stop", time.Second, c.Stop)
 	})
 }
+
+// realArmed reports whether the clock's real timer is armed, and leaves it stopped.
+func realArmed(c *Clock) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.real != nil && c.real.Stop()
+}
+
+// waitPassEnd fails unless the clock's release pass ends within timeout.
+func waitPassEnd(t *testing.T, c *Clock, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		c.mu.Lock()
+		passing := c.passing
+		c.mu.Unlock()
+		if !passing {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("release pass did not end within %v", timeout)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// R1.6, R1.11: Pause and Stop called from another goroutine while a callback holds a
+// release pass stop the real timer at once, not when the pass ends. A pass that ends on a
+// running clock still re-arms the timer.
+func TestClockPauseAndStopDuringPass(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call func(c *Clock) // nil: the clock keeps running
+	}{
+		{"Pause", (*Clock).Pause},
+		{"Stop", (*Clock).Stop},
+		{"running", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewClock(1)
+			defer c.Stop()
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			returned := make(chan struct{})
+			c.AfterFunc(0, func() {
+				close(entered)
+				<-release
+				close(returned)
+			})
+			select {
+			case <-entered:
+			case <-time.After(time.Second):
+				t.Fatal("callback did not start")
+			}
+			defer func() {
+				select {
+				case <-release:
+				default:
+					close(release)
+				}
+			}()
+
+			// A pending entry that cannot be due within the test, so that a pass ending
+			// on a running clock has a deadline to arm the real timer for.
+			c.NewTimer(time.Hour)
+
+			// Arm the real timer for that entry, as a re-arm that raced the start of
+			// this pass (after the real timer fired, before wake took the lock) leaves
+			// it. The public API cannot hold that window open, so the test arms it
+			// directly.
+			c.mu.Lock()
+			c.real.Reset(time.Hour)
+			c.mu.Unlock()
+
+			if tc.call == nil {
+				close(release)
+				waitPassEnd(t, c, time.Second)
+				if !realArmed(c) {
+					t.Fatal("real timer not armed after a pass ended on a running clock")
+				}
+				return
+			}
+
+			returnsWithin(t, tc.name, time.Second, func() { tc.call(c) })
+			select {
+			case <-returned:
+				t.Fatal("callback returned before it was released")
+			default:
+			}
+			if realArmed(c) {
+				t.Fatalf("real timer still armed after %s during a pass", tc.name)
+			}
+
+			// Re-arm it again: the end of the pass must stop it, not arm it.
+			c.mu.Lock()
+			c.real.Reset(time.Hour)
+			c.mu.Unlock()
+			close(release)
+			select {
+			case <-returned:
+			case <-time.After(time.Second):
+				t.Fatal("callback did not return after release")
+			}
+			waitPassEnd(t, c, time.Second)
+			if realArmed(c) {
+				t.Fatalf("real timer armed after a pass ended on a clock after %s", tc.name)
+			}
+		})
+	}
+}

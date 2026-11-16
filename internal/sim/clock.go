@@ -249,14 +249,21 @@ func (c *Clock) earliestLocked() *clockEntry {
 }
 
 // armLocked arms the real timer for the earliest pending deadline, or stops it while the
-// clock is paused, stopped or empty. During a pass it does nothing: the pass looks for
-// due entries again and arms the timer when it finishes.
+// clock is paused, stopped or empty. While paused or stopped it stops the timer even
+// during a pass (R1.6, R1.11). Otherwise, during a pass, it does nothing: the pass looks
+// for due entries again and arms the timer when it finishes.
 func (c *Clock) armLocked() {
+	if c.paused || c.stopped {
+		if c.real != nil {
+			c.real.Stop()
+		}
+		return
+	}
 	if c.passing {
 		return
 	}
 	first := c.earliestLocked()
-	if c.paused || c.stopped || first == nil {
+	if first == nil {
 		if c.real != nil {
 			c.real.Stop()
 		}
