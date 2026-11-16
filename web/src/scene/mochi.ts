@@ -153,7 +153,7 @@ const shared = {
   crown: crownGeometry(),
   pearl: new THREE.SphereGeometry(1, 16, 12),
   lamp: new THREE.SphereGeometry(0.06, 18, 14),
-  ring: new THREE.RingGeometry(0.66, 0.69, TIMER_SEGMENTS, 1),
+  ring: new THREE.RingGeometry(0.62, 0.72, TIMER_SEGMENTS, 1),
 
   ink: new THREE.MeshStandardMaterial({ color: palette.ink, roughness: 0.45 }),
   whisker: new THREE.MeshStandardMaterial({ color: "#6d6268", roughness: 0.6 }),
@@ -165,6 +165,8 @@ const shared = {
 
 const sleepyTint = new THREE.Color(palette.sleepy);
 const white = new THREE.Color(0xffffff);
+/** Pushes the arc above the bloom threshold so themes with bloom light it softly. */
+const TIMER_GLOW = 1.4;
 const timerFull = new THREE.Color(palette.timerFull);
 const timerLow = new THREE.Color(palette.timerLow);
 
@@ -185,8 +187,6 @@ export class Mochi {
   private readonly light: THREE.PointLight;
   private readonly timerRing: THREE.Mesh;
   private readonly timerMat: THREE.MeshBasicMaterial;
-  private readonly trackRing: THREE.Mesh;
-  private readonly trackMat: THREE.MeshBasicMaterial;
   private readonly campaignSigil: Sigil;
   private readonly leaderSigil: Sigil;
   private readonly label: HTMLDivElement;
@@ -203,6 +203,7 @@ export class Mochi {
   private readonly lampIntensity: number;
   private campaign = 0;
   private leading = 0;
+  private countdown = 0;
   private hover = 0;
   private hovered = false;
   private lastRole = "";
@@ -246,16 +247,12 @@ export class Mochi {
     this.root.add(this.light);
 
     // Floor: election countdown ring, and sigils for campaigning and leading.
-    this.trackMat = new THREE.MeshBasicMaterial({ color: palette.timerTrack, transparent: true, opacity: 0.4, depthWrite: false });
-    this.trackRing = new THREE.Mesh(shared.ring, this.trackMat);
-    this.timerMat = new THREE.MeshBasicMaterial({ color: palette.timerFull, transparent: true, opacity: 0.9, depthWrite: false });
+    this.timerMat = new THREE.MeshBasicMaterial({ color: palette.timerFull, transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
     this.timerRing = new THREE.Mesh(shared.ring.clone(), this.timerMat);
-    for (const [ring, y] of [[this.trackRing, 0.052], [this.timerRing, 0.054]] as const) {
-      ring.rotation.x = -Math.PI / 2;
-      ring.rotation.z = Math.PI / 2;
-      ring.position.y = y;
-      this.root.add(ring);
-    }
+    this.timerRing.rotation.x = -Math.PI / 2;
+    this.timerRing.rotation.z = Math.PI / 2;
+    this.timerRing.position.y = 0.054;
+    this.root.add(this.timerRing);
     this.campaignSigil = new Sigil(0.95, { scheme: "moon", simple: true, points: 5, seed: 1, ink: 0.55 * (look?.sigilInk ?? 1), ...(look && { glow: look.sigilGlow }) });
     this.leaderSigil = new Sigil(1.05, { scheme: "sun", simple: true, points: 6, seed: 0, ink: 0.5 * (look?.sigilInk ?? 1), ...(look && { glow: look.sigilGlow }) });
     for (const s of [this.campaignSigil, this.leaderSigil]) {
@@ -289,12 +286,11 @@ export class Mochi {
     this.bodyMat.map?.dispose();
     this.bodyMat.dispose();
     this.timerMat.dispose();
-    this.trackMat.dispose();
     this.timerRing.geometry.dispose();
     for (const s of [this.campaignSigil, this.leaderSigil]) s.dispose();
   }
 
-  update(dt: number, t: number, m: MemberState, now: number, camera: THREE.Vector3) {
+  update(dt: number, t: number, m: MemberState, now: number, camera: THREE.Vector3, noLeader: boolean) {
     const alive = m.alive;
     const role = alive ? m.role : "Down";
     if (role !== this.lastRole) {
@@ -350,21 +346,24 @@ export class Mochi {
     this.leaderSigil.opacity = this.leading * 0.9;
     this.leaderSigil.spin(t, 1);
 
-    this.updateTimer(m, now, alive);
+    this.updateTimer(dt, m, now, alive, noLeader);
     this.updateLabel(m);
   }
 
-  private updateTimer(m: MemberState, now: number, alive: boolean) {
+  private updateTimer(dt: number, m: MemberState, now: number, alive: boolean, noLeader: boolean) {
     let fraction = 0;
     if (alive && m.timerStart !== null && m.timerDurationMs > 0) {
       fraction = Math.max(0, 1 - (now - m.timerStart) / m.timerDurationMs);
     }
-    const show = alive && m.role === "Follower" && m.timerStart !== null;
-    this.trackRing.visible = show;
-    this.timerRing.visible = show && fraction > 0;
-    if (show) {
+    // The countdown only means something while no leader is alive to reset it.
+    const show = alive && m.role === "Follower" && m.timerStart !== null && noLeader;
+    this.countdown = damp(this.countdown, show ? 1 : 0, 12, dt);
+    const visible = this.countdown > 0.01;
+    this.timerRing.visible = visible && fraction > 0;
+    if (visible) {
+      this.timerMat.opacity = this.countdown * 0.95;
       this.timerRing.geometry.setDrawRange(0, Math.ceil(fraction * TIMER_SEGMENTS) * 6);
-      this.timerMat.color.copy(timerLow).lerp(timerFull, Math.min(1, fraction * 1.5));
+      this.timerMat.color.copy(timerLow).lerp(timerFull, fraction).multiplyScalar(TIMER_GLOW);
     }
   }
 

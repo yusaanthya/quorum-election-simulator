@@ -161,7 +161,7 @@ function renderLoop(time?: number) {
       shownRoles[i] = role;
       theme.onRole?.(b, role);
     }
-    b.update(dt, t, m, now, stage.camera.position);
+    b.update(dt, t, m, now, stage.camera.position, !state.leader);
   });
   packets.update(dt, stage.camera);
   sparkles.update(dt);

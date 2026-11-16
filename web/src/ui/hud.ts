@@ -96,7 +96,7 @@ export class Hud {
             <ul>
               <li><span class="ico ico-leader">${crown}</span>隊長</li>
               <li><span class="ico ico-candidate">${circle}</span>候選人</li>
-              <li><span class="ico ico-follower">${ring}</span>追隨者 · 選舉倒數</li>
+              <li><span class="ico ico-follower">${ring}</span>選舉倒數（沒有隊長時）</li>
               <li><span class="ico ico-down">${hollow}</span>停止</li>
             </ul>
             <ul>

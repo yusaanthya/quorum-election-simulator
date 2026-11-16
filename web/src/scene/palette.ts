@@ -10,9 +10,8 @@ export const palette = {
   crown: "#ecd08c",
   lamp: "#ffe7bf",
 
-  timerFull: "#9cc7a8",
-  timerLow: "#e0a08c",
-  timerTrack: "#ffffff",
+  timerFull: "#6fe0a0",
+  timerLow: "#ff6b4a",
   candidateGlow: "#f3dfa6",
 
   envelope: "#f6efe2",
