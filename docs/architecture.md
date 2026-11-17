@@ -88,6 +88,52 @@ An event in a member follows one path: `Member.handle` takes the member's lock,
 calls one `raft.Node` method, executes the returned outputs in order, and
 reports a status event if the node's status changed.
 
+### Time in, events out
+
+`internal/core` takes time in through `core.Timer` and reports out through
+`core.Observer`. It does not know what is on either side. In a `sim.Session`:
+
+```mermaid
+flowchart LR
+    subgraph session["sim.Session"]
+        ctl["Pause · Resume · SetTimeScale"]
+        clock["sim.Clock"]
+        run["run loop"]
+        obs["ObserverFunc"]
+    end
+    subgraph core["internal/core"]
+        quorum["Quorum"]
+        member["Member × N"]
+    end
+    ctl --> clock
+    run -- "NewQuorumWithOptions(clock, observer)" --> quorum
+    quorum --> member
+    clock -- "core.Timer: timer channels, AfterFunc" --> member
+    member -- "OnEvent(e)" --> obs
+    quorum -- "Done()" --> run
+    obs -- "sink(e)" --> sink["sink<br/>internal/web: SSE hub<br/>cmd/wasm: JavaScript callback"]
+    ctl -- "clock events" --> sink
+    sink --> fe["front end"]
+```
+
+- **Time comes in through `core.Timer`.** A `Session` passes its `sim.Clock`, so
+  pausing or slowing the clock pauses or slows every election timeout,
+  heartbeat, quorum check and message delay together. `play` passes
+  `core.NewRealTimer()` and the core tests pass `MockTimer`; `core` cannot tell
+  them apart.
+- **A member reacts to time inside `core`.** It reads its own timer channels
+  and asks its `raft.Node` what to do. Nothing outside `core` starts an
+  election.
+- **Events go out one way, through `core.Observer`.** `core` calls `OnEvent`
+  and reads nothing back. The session's `ObserverFunc` forwards each event to
+  its sink and drops the events of a cluster it is replacing. Whoever creates
+  the session chooses the sink: `internal/web` publishes to its SSE hub, and
+  `cmd/wasm` hands JSON to JavaScript. The session sends its own `clock` events
+  to the same sink.
+- **The session's control does not use events.** It learns that every member
+  has stopped from `Quorum.Done()`, then waits `restartDelay` on its clock
+  before it starts a fresh cluster.
+
 ## Run modes
 
 Both modes run the same `internal/sim` and `internal/core` code and deliver the
