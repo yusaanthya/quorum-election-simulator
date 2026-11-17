@@ -112,7 +112,9 @@ The claim on an item is the remote branch `claude/item-<id>`, created at the
 base commit with one empty commit `chore: claim <id>`. An item is claimed when
 that branch exists in this repository or a pull request from that branch of
 this repository exists in any state. A branch or pull request of a fork never
-counts. A claim branch without a pull request is an orphaned claim.
+counts. A claim branch without a pull request is a claim in progress while
+its claim commit's committer date is less than 3 hours old, since another
+run may still be working on it, and an orphaned claim after that.
 
 Order: oldest `created` first among valid, unclaimed, `ready` items whose
 `dependsOn` is satisfied.
@@ -131,7 +133,9 @@ Order: oldest `created` first among valid, unclaimed, `ready` items whose
       the new base.
    5. List this repository's branches starting with `claude/item-` and the
       pull requests whose head is such a branch of this repository. If there
-      is an orphaned claim, or 3 or more such pull requests are open, exit.
+      is a claim in progress, exit with a run summary that names it and asks
+      nothing of the owner. If there is an orphaned claim, or 3 or more such
+      pull requests are open, exit and report it.
 2. **Select** the first item in the order of section 2.3. None: exit, having
    written nothing.
 3. **Claim** (section 2.3) and push without force. A rejected push means
