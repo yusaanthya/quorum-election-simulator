@@ -16,7 +16,7 @@ outside its scope.
 
 ## Quick start
 
-Download and extract the ZIP from [v0.3.0](https://github.com/yusaanthya/quorum-election-simulator/releases/tag/v0.3.0).
+Download and extract the ZIP from [v0.4.0](https://github.com/yusaanthya/quorum-election-simulator/releases/tag/v0.4.0).
 It includes binaries for Windows, macOS (`darwin`), and Linux, each for `amd64`
 and `arm64`. You do not need Go to run a prebuilt binary.
 
@@ -49,10 +49,10 @@ chmod +x quorum_election_app_linux_amd64
 
 On macOS, substitute `quorum_election_app_darwin_arm64` for Apple Silicon or
 `quorum_election_app_darwin_amd64` for Intel. For Linux ARM64, use
-`quorum_election_app_linux_arm64`. The v0.3.0 Linux amd64 binary is dynamically
+`quorum_election_app_linux_arm64`. The v0.4.0 Linux amd64 binary is dynamically
 linked and requires a compatible glibc environment.
 
-The `version` command should report `0.3.0`. Omitting `--members` starts three
+The `version` command should report `0.4.0`. Omitting `--members` starts three
 members; `-m` is shorthand for `--members`.
 
 ## Try a failover
@@ -288,7 +288,7 @@ cd bin/quorum-election
 ./quorum_election_app_linux_amd64 play --members 5
 ```
 
-From the repository root, `make clean all VERSION=0.3.0` rebuilds all platforms
+From the repository root, `make clean all VERSION=0.4.0` rebuilds all platforms
 with an explicit version. Without `VERSION`, builds retain the version in
 [`internal/config/config.go`](internal/config/config.go). Plain `make` only
 creates the output directory; use `make all` to build binaries.
