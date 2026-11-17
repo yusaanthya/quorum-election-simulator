@@ -348,6 +348,10 @@ h1 span {
   margin-top: 14px;
 }
 
+.controls + .controls {
+  margin-top: 8px;
+}
+
 .spacer {
   flex: 1;
 }
@@ -427,6 +431,16 @@ button {
 
 .btn:active:not(:disabled) {
   box-shadow: inset 0 1px 3px rgba(40, 32, 60, 0.25);
+}
+
+.btn[aria-pressed="true"] {
+  border-color: var(--lavender-ink);
+  background: var(--lavender);
+  color: #fbf7ee;
+}
+
+.btn[aria-pressed="true"]:hover:not(:disabled) {
+  background: #9a8bcb;
 }
 
 .btn:disabled {
@@ -741,6 +755,10 @@ h2 {
   .controls {
     gap: 6px;
     margin-top: 10px;
+  }
+
+  .controls + .controls {
+    margin-top: 6px;
   }
 
   .ctl-label {

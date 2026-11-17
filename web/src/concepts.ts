@@ -82,9 +82,9 @@ const lead = roles.indexOf("Leader");
 const followers = roles.flatMap((r, i) => (r === "Follower" ? [i] : []));
 function send() {
   if (theme === lineup) return; // Keep the close-up uncluttered
-  for (const peer of [lead, ...followers]) packets.spawn("request_vote", false, 1800, mochis[cand].anchor(from), mochis[peer].anchor(to));
-  packets.spawn("vote_reply", true, 1800, mochis[followers[0]].anchor(from), mochis[cand].anchor(to));
-  for (const peer of followers) packets.spawn("heartbeat", false, 1400, mochis[lead].anchor(from), mochis[peer].anchor(to));
+  for (const peer of [lead, ...followers]) packets.spawn("request_vote", false, 1800, mochis[cand].anchor(from), mochis[peer].anchor(to), performance.now());
+  packets.spawn("vote_reply", true, 1800, mochis[followers[0]].anchor(from), mochis[cand].anchor(to), performance.now());
+  for (const peer of followers) packets.spawn("heartbeat", false, 1400, mochis[lead].anchor(from), mochis[peer].anchor(to), performance.now());
 }
 send();
 setInterval(send, 1300);
@@ -100,6 +100,6 @@ function renderLoop(time?: number) {
   theme.animate?.(t, dt);
   // Freeze the countdown rings partway so the still shows them.
   mochis.forEach((m, i) => m.update(dt, t, members[i], now + 1500, stage.camera.position, true));
-  packets.update(dt, stage.camera);
+  packets.update(performance.now(), stage.camera);
   stage.render();
 }

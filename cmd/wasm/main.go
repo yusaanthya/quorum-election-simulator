@@ -6,6 +6,11 @@
 //	quorumSim.start({members, timeScale}, onEvent) // onEvent receives one JSON string per event
 //	quorumSim.kill(id)
 //	quorumSim.restart(members)                     // 0 keeps the current size
+//	quorumSim.pause()
+//	quorumSim.resume()
+//	quorumSim.setTimeScale(n)                      // Chosen factor, clamped to 1-20
+//
+// Every call except start does nothing before start.
 package main
 
 import (
@@ -60,6 +65,24 @@ func main() {
 					n = args[0].Int()
 				}
 				session.Restart(n)
+			}
+			return nil
+		}),
+		"pause": js.FuncOf(func(this js.Value, args []js.Value) any {
+			if session != nil {
+				session.Pause()
+			}
+			return nil
+		}),
+		"resume": js.FuncOf(func(this js.Value, args []js.Value) any {
+			if session != nil {
+				session.Resume()
+			}
+			return nil
+		}),
+		"setTimeScale": js.FuncOf(func(this js.Value, args []js.Value) any {
+			if session != nil && len(args) > 0 && args[0].Type() == js.TypeNumber {
+				session.SetTimeScale(args[0].Float())
 			}
 			return nil
 		}),
