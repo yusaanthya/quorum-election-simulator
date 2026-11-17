@@ -49,7 +49,7 @@ func InitCLI() *cobra.Command {
 	rootCmd.PersistentFlags().IntVarP(&members, "members", "m", 3, "Initial number of quorum members")
 
 	serveCmd.Flags().StringVar(&serveAddr, "addr", ":8080", "Address to serve the visualizer on")
-	serveCmd.Flags().Float64Var(&serveSlowmo, "slowmo", 3, "Slow-motion factor applied to every election timer (1 = real time)")
+	serveCmd.Flags().Float64Var(&serveSlowmo, "slowmo", 3, "Initial slow-motion factor, 1 to 20 (1 = real time)")
 
 	rootCmd.AddCommand(playCmd)
 	rootCmd.AddCommand(serveCmd)

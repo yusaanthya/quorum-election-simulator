@@ -19,6 +19,7 @@ const (
 	EventLostQuorum           EventType = "lost_quorum"
 	EventHalted               EventType = "halted"
 	EventStopped              EventType = "stopped"
+	EventClock                EventType = "clock" // Emitted by the session, never by core
 )
 
 // Message kinds carried by EventMessage.
@@ -46,9 +47,14 @@ type Event struct {
 	Halted   bool   `json:"halted"`
 	Alive    bool   `json:"alive"`
 
-	Contacted  int   `json:"contacted"`  // EventLostQuorum
-	DurationMs int64 `json:"durationMs"` // Timeout for EventElectionTimer, delivery delay for EventMessage
-	Members    int   `json:"members"`    // EventQuorumStarted
+	Contacted int `json:"contacted"` // EventLostQuorum
+	// DurationMs is in simulated milliseconds: the timeout for EventElectionTimer, the
+	// delivery delay for EventMessage.
+	DurationMs int64 `json:"durationMs"`
+	Members    int   `json:"members"` // EventQuorumStarted
+
+	Paused    bool    `json:"paused"`    // EventClock
+	TimeScale float64 `json:"timeScale"` // EventClock: the chosen factor
 }
 
 // Observer receives events from members and the quorum. It is called from many

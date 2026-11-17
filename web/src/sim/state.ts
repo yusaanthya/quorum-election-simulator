@@ -8,7 +8,7 @@ export interface MemberState {
   failures: number;
   alive: boolean;
   halted: boolean;
-  /** performance.now() when the election timer was last reset, or null while it is stopped. */
+  /** Simulated milliseconds (SimClock.now) when the election timer was last reset, or null while it is stopped. */
   timerStart: number | null;
   timerDurationMs: number;
 }

@@ -1,5 +1,6 @@
 // Package web serves the 3D visualizer: the embedded front end, a Server-Sent Events
-// stream of cluster events, and a small JSON API for kill and restart.
+// stream of cluster events, and a small JSON API for kill, restart, pause, resume and the
+// slow-motion factor.
 package web
 
 import (
@@ -20,7 +21,9 @@ import (
 //go:embed all:dist
 var dist embed.FS
 
-// subscriberBuffer bounds how far a slow viewer may fall behind before events are dropped.
+// subscriberBuffer bounds how far a slow viewer may fall behind. A viewer whose buffer is
+// full is disconnected, never left connected with events missing; its EventSource then
+// reconnects and receives a fresh snapshot.
 const subscriberBuffer = 1024
 
 // Hub fans events out to every connected viewer without blocking the cluster.
@@ -33,7 +36,8 @@ func NewHub() *Hub {
 	return &Hub{subs: make(map[chan []byte]struct{})}
 }
 
-// Publish sends e to every subscriber, dropping it for any whose buffer is full.
+// Publish sends e to every subscriber. A subscriber whose buffer is full is removed and
+// its channel closed, which ends its stream.
 func (h *Hub) Publish(e core.Event) {
 	data, err := json.Marshal(e)
 	if err != nil {
@@ -46,6 +50,8 @@ func (h *Hub) Publish(e core.Event) {
 		select {
 		case ch <- data:
 		default:
+			delete(h.subs, ch)
+			close(ch)
 		}
 	}
 }
@@ -58,6 +64,7 @@ func (h *Hub) subscribe() chan []byte {
 	return ch
 }
 
+// unsubscribe removes ch. It is a no-op for a subscriber Publish already removed.
 func (h *Hub) unsubscribe(ch chan []byte) {
 	h.mu.Lock()
 	delete(h.subs, ch)
@@ -77,6 +84,9 @@ func NewServer(session *sim.Session, hub *Hub) *Server {
 	s.mux.HandleFunc("GET /api/config", s.handleConfig)
 	s.mux.HandleFunc("POST /api/kill", s.handleKill)
 	s.mux.HandleFunc("POST /api/restart", s.handleRestart)
+	s.mux.HandleFunc("POST /api/pause", s.handlePause)
+	s.mux.HandleFunc("POST /api/resume", s.handleResume)
+	s.mux.HandleFunc("POST /api/timescale", s.handleTimeScale)
 	s.mux.Handle("GET /", staticHandler())
 	return s
 }
@@ -95,7 +105,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	// Subscribe before taking the snapshot so no change falls between them.
+	// Subscribe before taking the snapshot so no change falls between them. The snapshot
+	// ends with the clock state; clock events published since the subscription follow it
+	// in order, so the last one a client holds is the current state.
 	ch := s.hub.subscribe()
 	defer s.hub.unsubscribe(ch)
 
@@ -109,12 +121,19 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case data := <-ch:
+		case data, ok := <-ch:
+			if !ok {
+				return // Disconnected by Publish after a buffer overflow
+			}
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			// Send whatever else is already queued in the same write.
 			for drained := false; !drained; {
 				select {
-				case more := <-ch:
+				case more, ok := <-ch:
+					if !ok {
+						flusher.Flush()
+						return
+					}
 					fmt.Fprintf(w, "data: %s\n\n", more)
 				default:
 					drained = true
@@ -156,6 +175,30 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.session.Restart(req.Members)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handlePause(w http.ResponseWriter, r *http.Request) {
+	s.session.Pause()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
+	s.session.Resume()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleTimeScale sets the chosen factor. Any finite number is accepted; the session
+// clamps it to 1-20.
+func (s *Server) handleTimeScale(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TimeScale *float64 `json:"timeScale"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TimeScale == nil {
+		http.Error(w, `body must be {"timeScale": <number>}`, http.StatusBadRequest)
+		return
+	}
+	s.session.SetTimeScale(*req.TimeScale)
 	w.WriteHeader(http.StatusNoContent)
 }
 
