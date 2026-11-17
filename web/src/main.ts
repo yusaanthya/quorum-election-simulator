@@ -49,6 +49,7 @@ const hud = new Hud(document.getElementById("hud")!, source.label, {
   pause: () => source.pause(),
   resume: () => source.resume(),
   setTimeScale: (scale) => source.setTimeScale(scale),
+  setAutoSlow: (enabled) => source.setAutoSlow(enabled),
 });
 
 const from = new THREE.Vector3();
@@ -77,7 +78,7 @@ function onEvent(e: SimEvent) {
   simClock.advance(performance.now());
   if (e.type === "clock") {
     simClock.apply(e);
-    hud.setClock(e.paused, e.timeScale);
+    hud.setClock(e.paused, e.timeScale, e.factor, e.autoSlow);
     return;
   }
   if (state.apply(e, simClock.now)) {

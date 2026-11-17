@@ -9,14 +9,16 @@ export class SimClock {
   paused = false;
   /** The chosen factor: wall time divided by simulated time. */
   timeScale = 1;
+  /** The effective factor the simulation clock runs at; above timeScale during an election. */
+  factor = 1;
   /** Simulated milliseconds elapsed locally. */
   now = 0;
   private lastWallMs: number | null = null;
 
-  /** Adds the wall time since the previous call, divided by the factor, unless paused. */
+  /** Adds the wall time since the previous call, divided by the effective factor, unless paused. */
   advance(wallNowMs: number): void {
     if (this.lastWallMs !== null && !this.paused) {
-      this.now += (wallNowMs - this.lastWallMs) / this.timeScale;
+      this.now += (wallNowMs - this.lastWallMs) / this.factor;
     }
     this.lastWallMs = wallNowMs;
   }
@@ -26,5 +28,6 @@ export class SimClock {
     if (e.type !== "clock") return;
     this.paused = e.paused;
     this.timeScale = e.timeScale;
+    this.factor = e.factor;
   }
 }

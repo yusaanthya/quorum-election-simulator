@@ -9,6 +9,7 @@
 //	quorumSim.pause()
 //	quorumSim.resume()
 //	quorumSim.setTimeScale(n)                      // Chosen factor, clamped to 1-20
+//	quorumSim.setAutoSlow(enabled)                 // Automatic slow motion during elections
 //
 // Every call except start does nothing before start.
 package main
@@ -83,6 +84,12 @@ func main() {
 		"setTimeScale": js.FuncOf(func(this js.Value, args []js.Value) any {
 			if session != nil && len(args) > 0 && args[0].Type() == js.TypeNumber {
 				session.SetTimeScale(args[0].Float())
+			}
+			return nil
+		}),
+		"setAutoSlow": js.FuncOf(func(this js.Value, args []js.Value) any {
+			if session != nil && len(args) > 0 && args[0].Type() == js.TypeBoolean {
+				session.SetAutoSlow(args[0].Bool())
 			}
 			return nil
 		}),
