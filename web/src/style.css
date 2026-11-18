@@ -435,12 +435,12 @@ button {
 
 .btn[aria-pressed="true"] {
   border-color: var(--lavender-ink);
-  background: var(--lavender);
+  background: var(--lavender-ink);
   color: #fbf7ee;
 }
 
 .btn[aria-pressed="true"]:hover:not(:disabled) {
-  background: #9a8bcb;
+  background: #4f4585;
 }
 
 .btn:disabled {
