@@ -92,7 +92,7 @@ In-page controls (labels are in Traditional Chinese):
 | `重新開局` (restart) | Starts a fresh cluster with the current member count. |
 | `慢動作` (slow motion) `1×` to `20×` | Slows all timers and messages by the selected factor; `1×` is real time. |
 | `暫停` / `繼續` (pause / resume) | Pauses or resumes the simulation, including messages in flight and countdown rings. |
-| `選舉時自動放慢` (slow down during elections) | On by default. Multiplies the slow-motion factor by 3 for 600 ms of simulated time after each election starts. |
+| `選舉時自動放慢` (slow down during elections) | On by default. Multiplies the slow-motion factor by 3 for 600 ms of simulated time after each election starts. On the live site and in builds from `main`; v0.4.0 does not have it. |
 | `圖例` (legend) | Explains the member states and message shapes. |
 
 `serve` accepts these flags:
@@ -217,9 +217,9 @@ goroutines, randomness, timers, logging, or I/O.
 In the visualizer, every election timer, leader ticker, and message delay in a
 session runs on a single `sim.Clock`. Pausing stops the clock, so no timers
 fire and no messages arrive until it resumes. Changing the slow-motion factor
-rescales all pending timers and messages at once. While automatic slow motion
-is on, each `election_started` slows the clock to 3 times the selected factor
-for 600 ms of simulated time. Each change emits a `clock`
+rescales all pending timers and messages at once. In builds from `main`, while
+automatic slow motion is on, each `election_started` slows the clock to 3 times
+the selected factor for 600 ms of simulated time. Each change emits a `clock`
 event, and the front end mirrors the clock so messages in flight and countdown
 rings freeze and change speed with the simulation instead of jumping.
 
@@ -379,15 +379,15 @@ Gate** status; see [the gate's documentation](docs/codex-review-gate.md).
 ## Status and limitations
 
 In v0.4.0, the visualizer runs on a controllable simulation clock with pause
-and slow motion. Two remaining parts of the
-[simulation clock design](docs/sim-clock/2026-11-15-sim-clock-spec.md) are
-planned for v0.5.0:
+and slow motion. The last two parts of the
+[simulation clock design](docs/sim-clock/2026-11-15-sim-clock-spec.md) ship in
+v0.5.0:
 
 - **Automatic slow motion during the vote exchange**, so the short burst of
   vote requests and replies is easy to follow without slowing down the entire
-  run.
+  run. Implemented on `main`, not yet released.
 - **A "two candidates at once" scenario**: a button that makes two members time
-  out simultaneously and race for votes in the same term.
+  out simultaneously and race for votes in the same term. Still planned.
 
 Current limitations:
 
@@ -412,7 +412,8 @@ Design:
 - [Architecture guide](docs/architecture.md): layers, seams, run modes, role
   transitions, and what enforces each rule.
 - [Simulation clock design](docs/sim-clock/2026-11-15-sim-clock-spec.md): the
-  clock behind pause and slow motion, and the two remaining planned steps.
+  clock behind pause and slow motion, automatic slow motion during elections
+  (on `main`, not yet released), and the planned two-candidate scenario.
 - [Refactor design](docs/refactor/02-spec.md): the move from member-owned rules
   to a pure Raft domain model.
 - [Makefile design](docs/makefile-cleanup/01-spec.md): build behavior and

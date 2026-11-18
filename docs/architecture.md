@@ -131,13 +131,16 @@ flowchart LR
   the session chooses the sink: `internal/web` publishes to its SSE hub, and
   `cmd/wasm` hands JSON to JavaScript. The session sends its own `clock` events
   to the same sink.
-- **One event changes the clock.** While automatic slow motion is on, the
-  observer forwards `election_started` and then opens a 600 ms window, in
-  simulated time, in which the slow-motion factor is 3 times the chosen
-  one. The window ends on time or when the session replaces the cluster.
-- **The session's control does not use events.** It learns that every member
-  has stopped from `Quorum.Done()`, then waits `restartDelay` on its clock
-  before it starts a fresh cluster.
+- **One event opens a slow window.** After forwarding `election_started`, the
+  observer opens a 600 ms window in simulated time, or extends an open one,
+  whether or not automatic slow motion is on. The window ends on time or when
+  the session replaces the cluster.
+- **The switch sets the multiplier.** While a window is open and automatic slow
+  motion is on, the slow-motion factor is 3 times the chosen one. Turning the
+  switch on or off during a window changes the factor at once.
+- **Restarting the cluster does not use events.** The session learns that
+  every member has stopped from `Quorum.Done()`, then waits `restartDelay` on
+  its clock before it starts a fresh cluster.
 
 ## Run modes
 
