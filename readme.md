@@ -92,6 +92,7 @@ In-page controls (labels are in Traditional Chinese):
 | `重新開局` (restart) | Starts a fresh cluster with the current member count. |
 | `慢動作` (slow motion) `1×` to `20×` | Slows all timers and messages by the selected factor; `1×` is real time. |
 | `暫停` / `繼續` (pause / resume) | Pauses or resumes the simulation, including messages in flight and countdown rings. |
+| `選舉時自動放慢` (slow down during elections) | On by default. Multiplies the slow-motion factor by 3 for 600 ms of simulated time after each election starts. |
 | `圖例` (legend) | Explains the member states and message shapes. |
 
 `serve` accepts these flags:
@@ -216,7 +217,9 @@ goroutines, randomness, timers, logging, or I/O.
 In the visualizer, every election timer, leader ticker, and message delay in a
 session runs on a single `sim.Clock`. Pausing stops the clock, so no timers
 fire and no messages arrive until it resumes. Changing the slow-motion factor
-rescales all pending timers and messages at once. Each change emits a `clock`
+rescales all pending timers and messages at once. While automatic slow motion
+is on, each `election_started` slows the clock to 3 times the selected factor
+for 600 ms of simulated time. Each change emits a `clock`
 event, and the front end mirrors the clock so messages in flight and countdown
 rings freeze and change speed with the simulation instead of jumping.
 
