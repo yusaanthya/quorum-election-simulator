@@ -42,9 +42,13 @@ one comment, without changing behavior. All are under
   seconds instead of hanging until the `go test` timeout. The posting
   goroutine does not call `t.Error` after the test returns (for example, it
   sends its error on a channel the test reads).
-- `cmd/wasm/main.go`: one comment at the `onEvent.Invoke` call saying that
-  the session calls the sink while it holds its lock, so an `onEvent` that
-  calls `quorumSim.*` synchronously would deadlock.
+- `cmd/wasm/main.go`: a short comment at the `onEvent.Invoke` call saying
+  that the session can call this callback for a `clock` event while it holds
+  its lock `s.mu`. A synchronous call from `onEvent` to a `quorumSim` function
+  that needs that lock, such as `pause`, would then deadlock; `kill` is safe
+  because it runs on a goroutine. Name the affected functions as found in
+  `internal/sim/session.go`, and recommend deferring such calls until the
+  callback returns (for example with `queueMicrotask` or `setTimeout`).
 - Each changed test passes `go test -race -count=20 -run '<name>$'` on its
   package, and the report gives the command and result.
 - The full check of `docs/night-runner.md` section 4.1 passes.
