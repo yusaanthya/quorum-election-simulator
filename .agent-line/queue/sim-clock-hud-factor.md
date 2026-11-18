@@ -17,14 +17,14 @@ give, an election shows `（選舉中 3.3000000000000003x）` for `slowmo=1.1`
 - `HUD.setClock` in `web/src/ui/hud.ts` formats the chosen factor in
   `慢動作 …x` and the effective factor in `（選舉中 …x）` with at most two
   decimals and no trailing zeros: `3.3000000000000003` shows `3.3`, `1.25`
-  shows `1.25`, `9` shows `9`. The values it compares and passes on are not
+  shows `1.25`, `1.236` shows `1.24`, `9` shows `9`. The values it compares and passes on are not
   rounded: the suffix still appears exactly when `factor !== timeScale`, and
   the preset buttons still match on the unrounded `timeScale`.
-- The formatting is a small function that `scripts/*.test.mjs` can import
-  without a DOM, the way `scripts/web-state.test.mjs` imports
-  `web/src/sim/state.ts`. A test covers the three examples above. If such an
-  import is not possible without a new dependency or a CI change, the report
-  says so and the formatting stays in `hud.ts` without a test.
+- The formatting is a small exported function that a `scripts/*.test.mjs`
+  file imports without a DOM, the way `scripts/web-state.test.mjs` imports
+  `web/src/sim/state.ts`. `web/src/ui/hud.ts` already imports in Node without
+  a DOM (it has only type imports), so the function may live there. A test
+  covers the four examples above.
 - With the presets (`1×` to `20×`) the HUD text is unchanged.
 - The full check of `docs/night-runner.md` section 4.1 passes.
 
