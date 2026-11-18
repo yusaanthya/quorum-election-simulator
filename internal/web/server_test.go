@@ -215,6 +215,29 @@ func TestClockCommandValidation(t *testing.T) {
 	}
 }
 
+// AC3.8: autoslow takes a JSON boolean and nothing else.
+func TestAutoSlowValidation(t *testing.T) {
+	srv := newTestServer(t)
+	cases := []struct {
+		body string
+		want int
+	}{
+		{`{"enabled": false}`, http.StatusNoContent},
+		{`{"enabled": true}`, http.StatusNoContent},
+		{``, http.StatusBadRequest},
+		{`{}`, http.StatusBadRequest},
+		{`nope`, http.StatusBadRequest},
+		{`{"enabled": null}`, http.StatusBadRequest},
+		{`{"enabled": 1}`, http.StatusBadRequest},
+		{`{"enabled": "true"}`, http.StatusBadRequest},
+	}
+	for _, c := range cases {
+		if got := post(t, srv, "/api/autoslow", c.body); got != c.want {
+			t.Errorf("POST /api/autoslow %q = %d, want %d", c.body, got, c.want)
+		}
+	}
+}
+
 // AC2.11: a client connecting while paused gets the snapshot ending with a paused clock.
 func TestEventStreamSnapshotEndsWithClock(t *testing.T) {
 	srv, session := newTestServerSession(t)

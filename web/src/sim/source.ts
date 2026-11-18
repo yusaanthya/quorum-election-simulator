@@ -9,6 +9,7 @@ export interface SimSource {
   pause(): void;
   resume(): void;
   setTimeScale(scale: number): void;
+  setAutoSlow(enabled: boolean): void;
 }
 
 export interface SourceOptions {
@@ -46,6 +47,10 @@ export class ServerSource implements SimSource {
   setTimeScale(scale: number) {
     void post("/api/timescale", { timeScale: scale });
   }
+
+  setAutoSlow(enabled: boolean) {
+    void post("/api/autoslow", { enabled });
+  }
 }
 
 async function post(path: string, body?: unknown) {
@@ -67,6 +72,7 @@ interface QuorumSimApi {
   pause(): void;
   resume(): void;
   setTimeScale(scale: number): void;
+  setAutoSlow(enabled: boolean): void;
 }
 
 declare global {
@@ -119,6 +125,10 @@ export class WasmSource implements SimSource {
 
   setTimeScale(scale: number) {
     this.api?.setTimeScale(scale);
+  }
+
+  setAutoSlow(enabled: boolean) {
+    this.api?.setAutoSlow(enabled);
   }
 }
 

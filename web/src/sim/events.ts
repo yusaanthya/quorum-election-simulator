@@ -42,4 +42,8 @@ export interface SimEvent {
   paused: boolean;
   /** "clock": the chosen factor (wall time per simulated time). */
   timeScale: number;
+  /** "clock": the effective factor the clock runs at; above timeScale during an election. */
+  factor: number;
+  /** "clock": whether automatic slow motion during elections is on. */
+  autoSlow: boolean;
 }

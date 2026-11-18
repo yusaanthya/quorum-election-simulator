@@ -6,6 +6,7 @@ export interface HudActions {
   pause(): void;
   resume(): void;
   setTimeScale(scale: number): void;
+  setAutoSlow(enabled: boolean): void;
 }
 
 type Tone = "info" | "vote" | "good" | "bad";
@@ -55,6 +56,7 @@ export class Hud {
   private readonly killLeaderBtn: HTMLButtonElement;
   private readonly scaleButtons: HTMLButtonElement[] = [];
   private readonly pauseBtn: HTMLButtonElement;
+  private readonly autoSlowBtn: HTMLButtonElement;
   private readonly feedToggle: HTMLButtonElement;
   private readonly legendToggle: HTMLButtonElement;
   private readonly sourceText: HTMLElement;
@@ -62,6 +64,8 @@ export class Hud {
   private lastKey = "";
   /** The paused state of the last clock event; the pause button acts on it. */
   private paused = false;
+  /** The automatic slow motion switch of the last clock event; its button acts on it. */
+  private autoSlow = true;
 
   constructor(root: HTMLElement, sourceLabel: string, actions: HudActions) {
     root.innerHTML = `
@@ -94,6 +98,9 @@ export class Hud {
           </div>
           <span class="spacer"></span>
           <button type="button" class="btn" data-action="pause" aria-pressed="false">暫停</button>
+        </div>
+        <div class="controls">
+          <button type="button" class="btn" data-action="auto-slow" aria-pressed="true">選舉時自動放慢</button>
         </div>
         <p class="conn" data-k="conn"><i></i><span data-k="source"></span></p>
       </section>
@@ -156,6 +163,8 @@ export class Hud {
     });
     this.pauseBtn = root.querySelector('[data-action="pause"]')!;
     this.pauseBtn.addEventListener("click", () => (this.paused ? actions.resume() : actions.pause()));
+    this.autoSlowBtn = root.querySelector('[data-action="auto-slow"]')!;
+    this.autoSlowBtn.addEventListener("click", () => actions.setAutoSlow(!this.autoSlow));
 
     // The feed starts collapsed to its latest line on phones; the legend is a pop-up there.
     this.feedToggle = root.querySelector('[data-action="feed"]')!;
@@ -175,13 +184,16 @@ export class Hud {
     this.legendToggle.setAttribute("aria-expanded", String(open));
   }
 
-  /** Shows the state of a clock event. */
-  setClock(paused: boolean, timeScale: number) {
+  /** Shows the state of a clock event. The presets mark the chosen factor, not the effective one. */
+  setClock(paused: boolean, timeScale: number, factor: number, autoSlow: boolean) {
     this.paused = paused;
+    this.autoSlow = autoSlow;
     this.pauseBtn.textContent = paused ? "繼續" : "暫停";
     this.pauseBtn.setAttribute("aria-pressed", String(paused));
+    this.autoSlowBtn.setAttribute("aria-pressed", String(autoSlow));
     this.scaleButtons.forEach((b) => b.classList.toggle("active", Number(b.dataset.scale) === timeScale));
-    this.sourceText.textContent = `${this.sourceLabel}${paused ? " · 已暫停" : ""} · 慢動作 ${timeScale}x`;
+    const election = factor !== timeScale ? `（選舉中 ${factor}x）` : "";
+    this.sourceText.textContent = `${this.sourceLabel}${paused ? " · 已暫停" : ""} · 慢動作 ${timeScale}x${election}`;
   }
 
   setConnected(connected: boolean) {

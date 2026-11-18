@@ -1,6 +1,6 @@
 // Package web serves the 3D visualizer: the embedded front end, a Server-Sent Events
-// stream of cluster events, and a small JSON API for kill, restart, pause, resume and the
-// slow-motion factor.
+// stream of cluster events, and a small JSON API for kill, restart, pause, resume, the
+// slow-motion factor and automatic slow motion during elections.
 package web
 
 import (
@@ -87,6 +87,7 @@ func NewServer(session *sim.Session, hub *Hub) *Server {
 	s.mux.HandleFunc("POST /api/pause", s.handlePause)
 	s.mux.HandleFunc("POST /api/resume", s.handleResume)
 	s.mux.HandleFunc("POST /api/timescale", s.handleTimeScale)
+	s.mux.HandleFunc("POST /api/autoslow", s.handleAutoSlow)
 	s.mux.Handle("GET /", staticHandler())
 	return s
 }
@@ -199,6 +200,20 @@ func (s *Server) handleTimeScale(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.session.SetTimeScale(*req.TimeScale)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAutoSlow switches automatic slow motion during elections. The field must be a
+// JSON boolean.
+func (s *Server) handleAutoSlow(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
+		http.Error(w, `body must be {"enabled": <boolean>}`, http.StatusBadRequest)
+		return
+	}
+	s.session.SetAutoSlow(*req.Enabled)
 	w.WriteHeader(http.StatusNoContent)
 }
 

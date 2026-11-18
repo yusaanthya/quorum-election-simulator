@@ -33,9 +33,10 @@ flowchart TB
 - `internal/core` runs a cluster: one goroutine per `Member`, timers, message
   delivery, logging, and the event stream. It knows nothing about the CLI, the
   browser or slow motion.
-- `internal/sim` keeps one cluster running for a viewer: slow motion,
-  simulated message latency, kill, restart, and restart after every member
-  stops. It knows nothing about HTTP or JavaScript.
+- `internal/sim` keeps one cluster running for a viewer. It owns the
+  simulation clock (`sim.Clock`: pause, resume and a time factor), simulated
+  message latency, kill, restart, and restart after every member stops. It
+  knows nothing about HTTP or JavaScript.
 - `internal/web` exposes a `sim.Session` over HTTP and Server-Sent Events and
   serves the front end embedded from `internal/web/dist`.
 - `cmd/wasm` exposes a `sim.Session` to JavaScript as `globalThis.quorumSim`.
@@ -61,8 +62,9 @@ flowchart TB
     scene --> simts
 ```
 
-- `sim/` turns the event stream into cluster state and talks to the
-  simulation. It knows nothing about three.js or how anything is drawn.
+- `sim/` turns the event stream into cluster state, mirrors the simulation
+  clock (`clock.ts`) and talks to the simulation. It knows nothing about
+  three.js or how anything is drawn.
 - `scene/` holds three.js building blocks that every theme shares: the stage,
   members, packets, shapes, palette and seeded randomness.
 - `scenery/` holds the themes, each built from `scene/` parts.
@@ -76,7 +78,7 @@ flowchart TB
 | Seam | Defined in | What it separates |
 | --- | --- | --- |
 | `raft.Output` | `internal/core/raft/output.go` | The node returns ordered decisions; `Member.apply` in `internal/core/member.go` executes them. |
-| `core.Timer` | `internal/core/timer.go` | Election timers and leader tickers. `RealTimer` and `MockTimer` (`internal/core/test_util.go`) implement it; `internal/sim` supplies its own for slow motion. |
+| `core.Timer` | `internal/core/timer.go` | Election timers, leader tickers and delayed calls. `RealTimer` and `MockTimer` (`internal/core/test_util.go`) implement it; a `Session` passes its `sim.Clock` (`internal/sim/clock.go`), which also schedules message and restart delays. |
 | `core.Networker` | `internal/core/quorum.go` | Message delivery. `DirectNetworker` writes to inbox channels without blocking. |
 | `core.Observer`, `core.Event` | `internal/core/observer.go` | Every observable change as one flat JSON record. It is the wire format the front end reads, mirrored in `web/src/sim/events.ts`. |
 | `SimSource` | `web/src/sim/source.ts` | Where events come from and where commands go: `ServerSource` or `WasmSource`. |
@@ -85,6 +87,52 @@ flowchart TB
 An event in a member follows one path: `Member.handle` takes the member's lock,
 calls one `raft.Node` method, executes the returned outputs in order, and
 reports a status event if the node's status changed.
+
+### Time in, events out
+
+`internal/core` takes time in through `core.Timer` and reports out through
+`core.Observer`. It does not know what is on either side. In a `sim.Session`:
+
+```mermaid
+flowchart LR
+    subgraph session["sim.Session"]
+        ctl["Pause · Resume · SetTimeScale"]
+        clock["sim.Clock"]
+        run["run loop"]
+        obs["ObserverFunc"]
+    end
+    subgraph core["internal/core"]
+        quorum["Quorum"]
+        member["Member × N"]
+    end
+    ctl --> clock
+    run -- "NewQuorumWithOptions(clock, observer)" --> quorum
+    quorum --> member
+    clock -- "core.Timer: timer channels, AfterFunc" --> member
+    member -- "OnEvent(e)" --> obs
+    quorum -- "Done()" --> run
+    obs -- "sink(e)" --> sink["sink<br/>internal/web: SSE hub<br/>cmd/wasm: JavaScript callback"]
+    ctl -- "clock events" --> sink
+    sink --> fe["front end"]
+```
+
+- **Time comes in through `core.Timer`.** A `Session` passes its `sim.Clock`, so
+  pausing or slowing the clock pauses or slows every election timeout,
+  heartbeat, quorum check and message delay together. `play` passes
+  `core.NewRealTimer()` and the core tests pass `MockTimer`; `core` cannot tell
+  them apart.
+- **A member reacts to time inside `core`.** It reads its own timer channels
+  and asks its `raft.Node` what to do. Nothing outside `core` starts an
+  election.
+- **Events go out one way, through `core.Observer`.** `core` calls `OnEvent`
+  and reads nothing back. The session's `ObserverFunc` forwards each event to
+  its sink and drops the events of a cluster it is replacing. Whoever creates
+  the session chooses the sink: `internal/web` publishes to its SSE hub, and
+  `cmd/wasm` hands JSON to JavaScript. The session sends its own `clock` events
+  to the same sink.
+- **The session's control does not use events.** It learns that every member
+  has stopped from `Quorum.Done()`, then waits `restartDelay` on its clock
+  before it starts a fresh cluster.
 
 ## Run modes
 
@@ -95,16 +143,19 @@ build mode.
 
 - **Go server.** `serve` runs `web.Run` (`internal/web/serve.go`). The browser
   reads `GET /api/events` as Server-Sent Events, starting with a snapshot of
-  the running cluster, and sends `POST /api/kill` and `POST /api/restart`.
+  the running cluster, and sends `POST /api/kill`, `/api/restart`, `/api/pause`,
+  `/api/resume` and `/api/timescale`.
   `ServerSource` is the client.
 - **WebAssembly.** The static site on Cloudflare Pages loads `quorum.wasm`,
   built from `cmd/wasm`, and the simulation runs in the tab. `WasmSource`
-  calls `quorumSim.start`, `kill` and `restart` and receives each event as a
+  calls `quorumSim.start`, `kill`, `restart`, `pause`, `resume` and
+  `setTimeScale` and receives each event as a
   JSON string.
 
 The `play` command uses neither: it logs to the terminal and emits no events.
 
-Planned work on a simulation clock is in [`sim-clock/`](sim-clock/).
+The simulation clock is described in [`sim-clock/`](sim-clock/); its pull
+requests 3 and 4 are still planned.
 
 ## Node roles
 

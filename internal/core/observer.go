@@ -55,6 +55,8 @@ type Event struct {
 
 	Paused    bool    `json:"paused"`    // EventClock
 	TimeScale float64 `json:"timeScale"` // EventClock: the chosen factor
+	Factor    float64 `json:"factor"`    // EventClock: the effective factor the clock runs at
+	AutoSlow  bool    `json:"autoSlow"`  // EventClock: automatic slow motion during elections
 }
 
 // Observer receives events from members and the quorum. It is called from many

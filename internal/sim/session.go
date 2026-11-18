@@ -27,6 +27,11 @@ const (
 	// the 500ms heartbeat interval and the 1500ms minimum election timeout.
 	minLatency = 180 * time.Millisecond
 	maxLatency = 260 * time.Millisecond
+
+	// Automatic slow motion: for electionSlowWindow of simulated time after the latest
+	// election_started, the clock runs electionSlowdown times slower than the chosen factor.
+	electionSlowdown   = 3
+	electionSlowWindow = 600 * time.Millisecond
 )
 
 // Config sets up a Session.
@@ -50,6 +55,12 @@ type Session struct {
 	closed  bool
 	paused  bool
 	scale   float64 // Chosen factor
+	// Automatic slow motion: the switch, whether a slow window is open, and the window's
+	// end in simulated time. window is the clock timer that ends it; run receives from it.
+	autoSlow   bool
+	windowOpen bool
+	windowEnd  time.Time
+	window     core.ITimer
 
 	restart chan int // New member count
 	started bool
@@ -60,14 +71,19 @@ type Session struct {
 // New creates a Session. sink receives events from many goroutines and must not block.
 func New(cfg Config, sink func(core.Event)) *Session {
 	scale := clampTimeScale(cfg.TimeScale)
+	clock := NewClock(scale)
+	window := clock.NewTimer(electionSlowWindow)
+	window.Stop() // Pending only while a window is open
 	return &Session{
-		sink:    sink,
-		clock:   NewClock(scale),
-		scale:   scale,
-		members: clampMembers(cfg.Members),
-		restart: make(chan int, 1),
-		done:    make(chan struct{}),
-		stopped: make(chan struct{}),
+		sink:     sink,
+		clock:    clock,
+		scale:    scale,
+		autoSlow: true,
+		window:   window,
+		members:  clampMembers(cfg.Members),
+		restart:  make(chan int, 1),
+		done:     make(chan struct{}),
+		stopped:  make(chan struct{}),
 	}
 }
 
@@ -116,7 +132,17 @@ func (s *Session) SetTimeScale(scale float64) {
 	scale = clampTimeScale(scale)
 	s.changeClock(func() {
 		s.scale = scale
-		s.clock.SetFactor(scale)
+		s.clock.SetFactor(s.factorLocked())
+	})
+}
+
+// SetAutoSlow switches automatic slow motion during elections. Switching it on during an
+// open window slows the rest of that window. Like Pause, it emits a clock event while
+// running, nothing before Start, and does nothing once Close has begun.
+func (s *Session) SetAutoSlow(enabled bool) {
+	s.changeClock(func() {
+		s.autoSlow = enabled
+		s.clock.SetFactor(s.factorLocked())
 	})
 }
 
@@ -136,7 +162,60 @@ func (s *Session) changeClock(change func()) {
 }
 
 func (s *Session) clockEventLocked() core.Event {
-	return core.Event{Type: core.EventClock, Paused: s.paused, TimeScale: s.scale}
+	return core.Event{
+		Type:      core.EventClock,
+		Paused:    s.paused,
+		TimeScale: s.scale,
+		Factor:    s.factorLocked(),
+		AutoSlow:  s.autoSlow,
+	}
+}
+
+// factorLocked is the effective factor: the chosen factor, slowed down further while
+// automatic slow motion is on and a window is open.
+func (s *Session) factorLocked() float64 {
+	if s.autoSlow && s.windowOpen {
+		return s.scale * electionSlowdown
+	}
+	return s.scale
+}
+
+// setWindowLocked opens or closes the slow window. When that changes the effective factor
+// it re-scales the clock and announces the new state, in the caller's critical section.
+func (s *Session) setWindowLocked(open bool) {
+	before := s.factorLocked()
+	s.windowOpen = open
+	if after := s.factorLocked(); after != before {
+		s.clock.SetFactor(after)
+		if s.started && !s.closed {
+			s.sink(s.clockEventLocked())
+		}
+	}
+}
+
+// openWindow opens the slow window after an election_started, or extends an open one to
+// electionSlowWindow after it. The end is stored before the timer is reset, so the
+// timer's deadline is never earlier than the stored end.
+func (s *Session) openWindow() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.windowEnd = s.clock.Now().Add(electionSlowWindow)
+	s.window.Reset(electionSlowWindow)
+	s.setWindowLocked(true)
+}
+
+// endWindowIfDue closes the slow window when its end has been reached on the clock. A
+// firing that belongs to an end that was extended since is ignored; the timer fires again.
+func (s *Session) endWindowIfDue() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || !s.windowOpen || s.clock.Now().Before(s.windowEnd) {
+		return
+	}
+	s.setWindowLocked(false)
 }
 
 func (s *Session) run() {
@@ -145,10 +224,18 @@ func (s *Session) run() {
 		// Once a cluster is being replaced, its shutdown events would only add noise.
 		var retired atomic.Bool
 		s.mu.Lock()
+		// A window of the replaced cluster ends here: its Stop has returned, so none of its
+		// members can open another, and the clock event comes before the new quorum_started.
+		s.window.Stop()
+		s.setWindowLocked(false)
 		q := core.NewQuorumWithOptions(s.members, s.clock, core.Options{
 			Observer: core.ObserverFunc(func(e core.Event) {
-				if !retired.Load() {
-					s.sink(e)
+				if retired.Load() {
+					return
+				}
+				s.sink(e)
+				if e.Type == core.EventElectionStarted {
+					s.openWindow()
 				}
 			}),
 			Latency: s.latency,
@@ -185,6 +272,8 @@ func (s *Session) run() {
 				endedC = ended.C()
 			case <-endedC:
 				break wait
+			case <-s.window.C():
+				s.endWindowIfDue()
 			}
 		}
 		stopEnded()

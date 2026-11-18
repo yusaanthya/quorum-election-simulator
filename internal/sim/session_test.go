@@ -12,12 +12,41 @@ import (
 type eventLog struct {
 	mu     sync.Mutex
 	events []core.Event
+	at     []time.Time // Wall time at which the sink received each event
 }
 
 func (l *eventLog) add(e core.Event) {
 	l.mu.Lock()
 	l.events = append(l.events, e)
+	l.at = append(l.at, time.Now())
 	l.mu.Unlock()
+}
+
+// indexFrom waits for the first event at index from or later that matches and returns
+// its index.
+func (l *eventLog) indexFrom(t *testing.T, from int, what string, match func(core.Event) bool) int {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		l.mu.Lock()
+		for i := from; i < len(l.events); i++ {
+			if match(l.events[i]) {
+				l.mu.Unlock()
+				return i
+			}
+		}
+		l.mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+	return -1
+}
+
+// timeAt reports when the sink received the event at index i.
+func (l *eventLog) timeAt(i int) time.Time {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.at[i]
 }
 
 func (l *eventLog) waitFor(t *testing.T, what string, match func(core.Event) bool) core.Event {
@@ -84,8 +113,34 @@ func isType(t core.EventType) func(core.Event) bool {
 	return func(e core.Event) bool { return e.Type == t }
 }
 
+// clockEvent is a clock event outside a slow window with automatic slow motion on, so the
+// effective factor equals the chosen one.
 func clockEvent(paused bool, scale float64) core.Event {
-	return core.Event{Type: core.EventClock, Paused: paused, TimeScale: scale}
+	return slowClockEvent(paused, scale, scale, true)
+}
+
+func slowClockEvent(paused bool, scale, factor float64, autoSlow bool) core.Event {
+	return core.Event{Type: core.EventClock, Paused: paused, TimeScale: scale, Factor: factor, AutoSlow: autoSlow}
+}
+
+// commandClocks drops the clock events a slow window emits on its own: those that change
+// only the effective factor. Every command changes another field or keeps the factor.
+func commandClocks(clocks []core.Event) []core.Event {
+	var out []core.Event
+	for i, e := range clocks {
+		if i > 0 {
+			prev := clocks[i-1]
+			if e.Factor != prev.Factor && e.Paused == prev.Paused && e.TimeScale == prev.TimeScale && e.AutoSlow == prev.AutoSlow {
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+func isSlowed(e core.Event) bool {
+	return e.Type == core.EventClock && e.Factor != e.TimeScale
 }
 
 // Simulated durations, in milliseconds, that events report whatever the factor (A8).
@@ -506,11 +561,277 @@ func TestClockEventOrder(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	clocks := log.clocks()
-	if want := 1 + 8*100*3 + 1; len(clocks) != want {
-		t.Errorf("recorded %d clock events, want %d", len(clocks), want)
+	// A slow window opening or ending adds clock events of its own; count the commands.
+	if n, want := len(commandClocks(clocks)), 1+8*100*3+1; n != want {
+		t.Errorf("recorded %d clock events from commands, want %d", n, want)
 	}
 	snap := s.Snapshot()
 	if last, want := clocks[len(clocks)-1], snap[len(snap)-1]; last != want {
 		t.Errorf("last clock event %+v, Snapshot() ends with %+v", last, want)
+	}
+}
+
+// C-2, A4, 6.2: automatic slow motion is on by default, every clock event carries the four
+// fields, and SetAutoSlow follows the rules of Pause before Start, while running and after
+// Close.
+func TestSetAutoSlow(t *testing.T) {
+	log := &eventLog{}
+	s := New(Config{Members: 3, TimeScale: 2}, log.add)
+	s.SetAutoSlow(false)
+	s.SetAutoSlow(true)
+	if n := log.len(); n != 0 {
+		t.Fatalf("sink received %d events before Start", n)
+	}
+	s.Start()
+	if got := log.since(0); len(got) == 0 || got[0] != slowClockEvent(false, 2, 2, true) {
+		t.Fatalf("first events = %+v, want clock with factor 2 and autoSlow true", got)
+	}
+
+	before := len(log.clocks())
+	s.SetAutoSlow(false)
+	clocks := log.clocks()
+	if len(clocks) != before+1 || clocks[len(clocks)-1] != slowClockEvent(false, 2, 2, false) {
+		t.Errorf("SetAutoSlow(false) emitted %+v, want one clock event with autoSlow false", clocks[before:])
+	}
+	log.waitFor(t, "first quorum", isType(core.EventQuorumStarted))
+	snap := s.Snapshot()
+	if last := snap[len(snap)-1]; last != slowClockEvent(false, 2, 2, false) {
+		t.Errorf("Snapshot() ends with %+v, want clock with factor 2 and autoSlow false", last)
+	}
+
+	s.Close()
+	n := log.len()
+	s.SetAutoSlow(true)
+	if got := log.since(n); len(got) != 0 {
+		t.Errorf("sink received %d events after Close: %+v", len(got), got)
+	}
+}
+
+// AC3.1: the first election slows the clock by electionSlowdown, and the window ends
+// electionSlowWindow of simulated time after the latest election_started.
+func TestElectionSlowsClock(t *testing.T) {
+	t.Parallel()
+	log := &eventLog{}
+	s := New(Config{Members: 3, TimeScale: 1}, log.add)
+	s.Start()
+	defer s.Close()
+
+	first := log.indexFrom(t, 0, "first election_started", isType(core.EventElectionStarted))
+	for i, e := range log.since(0)[:first] {
+		if e.Type == core.EventClock && i != 0 {
+			t.Errorf("clock event %+v at %d before the first election_started", e, i)
+		}
+	}
+	slow := log.indexFrom(t, first, "clock event with factor 3", isType(core.EventClock))
+	if got, want := log.since(slow)[0], slowClockEvent(false, 1, 3, true); got != want {
+		t.Fatalf("clock event after election_started = %+v, want %+v", got, want)
+	}
+
+	back := log.indexFrom(t, slow, "clock event with factor 1", func(e core.Event) bool {
+		return e.Type == core.EventClock && e.Factor == 1
+	})
+	latest := first
+	for i, e := range log.since(0)[:back] {
+		if e.Type == core.EventElectionStarted {
+			latest = i
+		}
+	}
+	elapsed := log.timeAt(back).Sub(log.timeAt(latest))
+	if elapsed < 1750*time.Millisecond || elapsed > 2800*time.Millisecond {
+		t.Errorf("factor returned to 1 after %v from the latest election_started, want 1750ms to 2800ms", elapsed)
+	}
+}
+
+// AC3.2: the window ends by time even while the lone survivor is still a candidate (A5).
+func TestSlowWindowEndsWithCandidateStanding(t *testing.T) {
+	t.Parallel()
+	log := &eventLog{}
+	s := New(Config{Members: 3, TimeScale: 1}, log.add)
+	s.Start()
+	defer s.Close()
+
+	log.waitFor(t, "first quorum", isType(core.EventQuorumStarted))
+	s.Kill(1)
+	s.Kill(2)
+	started := log.indexFrom(t, 0, "survivor's election_started", func(e core.Event) bool {
+		return e.Type == core.EventElectionStarted && e.Member == 0
+	})
+	if n := log.count(func(e core.Event) bool { return e.Type == core.EventElectionStarted && e.Member != 0 }); n != 0 {
+		t.Fatalf("%d election_started events from killed members", n)
+	}
+	slow := log.indexFrom(t, started, "clock event with factor 3", isType(core.EventClock))
+	if got := log.since(slow)[0]; got.Factor != 3 {
+		t.Fatalf("clock event after election_started = %+v, want factor 3", got)
+	}
+	back := log.indexFrom(t, slow, "clock event with factor 1", func(e core.Event) bool {
+		return e.Type == core.EventClock && e.Factor == 1
+	})
+
+	events := log.since(0)[:back]
+	latest := started
+	var status core.Event
+	for i, e := range events {
+		switch {
+		case e.Type == core.EventElectionStarted:
+			latest = i
+		case e.Type == core.EventStatus && e.Member == 0:
+			status = e
+		}
+	}
+	if status.Role != "Candidate" {
+		t.Errorf("survivor's latest status before the window ended = %+v, want role Candidate", status)
+	}
+	elapsed := log.timeAt(back).Sub(log.timeAt(latest))
+	if elapsed < 1750*time.Millisecond || elapsed > 2800*time.Millisecond {
+		t.Errorf("factor returned to 1 after %v from the latest election_started, want 1750ms to 2800ms", elapsed)
+	}
+}
+
+// AC3.3: with automatic slow motion off, an election leaves the effective factor alone.
+func TestAutoSlowOffKeepsFactor(t *testing.T) {
+	t.Parallel()
+	log := &eventLog{}
+	s := New(Config{Members: 3, TimeScale: 1}, log.add)
+	s.Start()
+	defer s.Close()
+
+	s.SetAutoSlow(false)
+	off := log.indexFrom(t, 0, "clock event with autoSlow false", func(e core.Event) bool {
+		return e.Type == core.EventClock && !e.AutoSlow
+	})
+	leader := log.waitFor(t, "a leader", isType(core.EventBecameLeader))
+	from := log.len()
+	s.Kill(leader.Member)
+	log.indexFrom(t, from, "the next election_started", func(e core.Event) bool {
+		return e.Type == core.EventElectionStarted && e.Term > leader.Term
+	})
+	time.Sleep(electionSlowWindow + 200*time.Millisecond) // Past where a window would end
+
+	for _, e := range log.since(off) {
+		if isSlowed(e) {
+			t.Errorf("clock event with factor != timeScale while automatic slow motion is off: %+v", e)
+		}
+	}
+}
+
+// waitSlowed starts a 3-member session at TimeScale 1 and waits for the clock event that
+// opens the first slow window.
+func waitSlowed(t *testing.T) (*Session, *eventLog) {
+	t.Helper()
+	log := &eventLog{}
+	s := New(Config{Members: 3, TimeScale: 1}, log.add)
+	s.Start()
+	t.Cleanup(s.Close)
+	log.waitFor(t, "clock event with factor 3", func(e core.Event) bool {
+		return e.Type == core.EventClock && e.Factor == 3
+	})
+	return s, log
+}
+
+// AC3.4: a pause freezes the window; commands while paused apply the effective factor, and
+// the window emits nothing on its own while paused.
+func TestPauseFreezesSlowWindow(t *testing.T) {
+	t.Parallel()
+	s, log := waitSlowed(t)
+
+	before := len(log.clocks())
+	s.Pause()
+	s.SetTimeScale(4)
+	s.SetAutoSlow(false)
+	s.SetAutoSlow(true)
+	want := []core.Event{
+		slowClockEvent(true, 1, 3, true),
+		slowClockEvent(true, 4, 12, true),
+		slowClockEvent(true, 4, 4, false),
+		slowClockEvent(true, 4, 12, true),
+	}
+	check := func(when string) {
+		got := log.clocks()[before:]
+		if len(got) != len(want) {
+			t.Errorf("%s: clock events %+v, want %+v", when, got, want)
+			return
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("%s: clock event %d = %+v, want %+v", when, i, got[i], want[i])
+			}
+		}
+	}
+	check("after the commands")
+	time.Sleep(3 * time.Second)
+	check("after 3s of pause")
+}
+
+// AC3.5: a restart during a paused window ends the window before the new quorum_started,
+// and the new cluster runs at the chosen factor until its own first election.
+func TestRestartEndsSlowWindow(t *testing.T) {
+	t.Parallel()
+	s, log := waitSlowed(t)
+
+	s.Pause()
+	from := log.len()
+	s.Restart(0)
+	started := log.indexFrom(t, from, "the new quorum_started", isType(core.EventQuorumStarted))
+	var back *core.Event
+	for _, e := range log.since(from)[:started-from] {
+		if e.Type == core.EventClock && e.Paused && e.Factor == e.TimeScale {
+			back = &e
+		}
+	}
+	if back == nil {
+		t.Errorf("no paused clock event with factor == timeScale before the new quorum_started: %+v", log.since(from)[:started-from])
+	}
+	snap := s.Snapshot()
+	if last := snap[len(snap)-1]; last.Type != core.EventClock || last.Factor != last.TimeScale {
+		t.Errorf("Snapshot() of the new cluster ends with %+v, want factor == timeScale", last)
+	}
+
+	s.Resume()
+	election := log.indexFrom(t, started, "the new cluster's first election_started", isType(core.EventElectionStarted))
+	for _, e := range log.since(started)[:election-started] {
+		if isSlowed(e) {
+			t.Errorf("slowed clock event before the new cluster's first election_started: %+v", e)
+		}
+	}
+}
+
+// AC3.6: the automatic slow motion switch and the chosen factor survive a restart (A9).
+func TestAutoSlowSurvivesRestart(t *testing.T) {
+	log := &eventLog{}
+	s := New(Config{Members: 3, TimeScale: 1}, log.add)
+	s.Start()
+	defer s.Close()
+	log.waitFor(t, "first quorum", isType(core.EventQuorumStarted))
+
+	s.SetAutoSlow(false)
+	s.SetTimeScale(4)
+	from := log.len()
+	s.Restart(0)
+	log.indexFrom(t, from, "the new quorum_started", isType(core.EventQuorumStarted))
+	snap := s.Snapshot()
+	if last := snap[len(snap)-1]; last.Type != core.EventClock || last.AutoSlow || last.TimeScale != 4 {
+		t.Errorf("Snapshot() ends with %+v, want autoSlow false and timeScale 4", last)
+	}
+}
+
+// AC3.7: Close during an open window returns, and nothing reaches the sink afterwards.
+func TestCloseDuringSlowWindow(t *testing.T) {
+	t.Parallel()
+	s, log := waitSlowed(t)
+
+	closed := make(chan struct{})
+	go func() {
+		s.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return during a slow window")
+	}
+	before := log.len()
+	time.Sleep(2500 * time.Millisecond)
+	if got := log.since(before); len(got) != 0 {
+		t.Errorf("sink received %d events after Close: %+v", len(got), got)
 	}
 }
