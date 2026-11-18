@@ -14,11 +14,11 @@ give, an election shows `（選舉中 3.3000000000000003x）` for `slowmo=1.1`
 
 ## Acceptance criteria
 
-- `HUD.setClock` in `web/src/ui/hud.ts` formats the chosen factor in
+- `Hud.setClock` in `web/src/ui/hud.ts` formats the chosen factor in
   `慢動作 …x` and the effective factor in `（選舉中 …x）` with at most two
   decimals and no trailing zeros: `3.3000000000000003` shows `3.3`, `1.25`
-  shows `1.25`, `1.236` shows `1.24`, `9` shows `9`. The values it compares and passes on are not
-  rounded: the suffix still appears exactly when `factor !== timeScale`, and
+  shows `1.25`, `1.236` shows `1.24`, `9` shows `9`. The values it compares
+  and passes on are not rounded: the suffix still appears exactly when `factor !== timeScale`, and
   the preset buttons still match on the unrounded `timeScale`.
 - The formatting is a small exported function that a `scripts/*.test.mjs`
   file imports without a DOM, the way `scripts/web-state.test.mjs` imports
