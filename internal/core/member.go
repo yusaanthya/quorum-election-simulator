@@ -40,7 +40,8 @@ type Member struct {
 
 	lastStatus raft.Status // Last status sent to observer; guarded by mu
 
-	// Owned by the Run goroutine
+	// Used only under mu, or by Run. Run sets electionTimer under mu, so a non-nil
+	// electionTimer read under mu means that Run has started.
 	electionTimer     ITimer
 	heartbeatTicker   ITicker
 	quorumCheckTicker ITicker
@@ -75,8 +76,8 @@ func (m *Member) Run() {
 	logrus.Infof("Member %d: Started Raft Node", m.ID)
 
 	timeout := electionTimeout()
-	m.electionTimer = m.timer.NewTimer(timeout)
 	m.mu.Lock()
+	m.electionTimer = m.timer.NewTimer(timeout)
 	m.lastStatus = m.node.Status()
 	// A member stopped before it started has already published stopped; stay silent.
 	if m.ctx.Err() == nil {
@@ -117,7 +118,12 @@ func (m *Member) Run() {
 func (m *Member) handle(event func() []raft.Output) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.handleLocked(event)
+}
 
+// handleLocked applies one node event and publishes the resulting status; the caller
+// holds mu.
+func (m *Member) handleLocked(event func() []raft.Output) {
 	// A stopped member processes nothing, even if select picked an event over ctx.Done
 	if m.ctx.Err() != nil {
 		return

@@ -10,6 +10,7 @@
 //	quorumSim.resume()
 //	quorumSim.setTimeScale(n)                      // Chosen factor, clamped to 1-20
 //	quorumSim.setAutoSlow(enabled)                 // Automatic slow motion during elections
+//	quorumSim.splitVote()                          // Two members time out together
 //
 // Every call except start does nothing before start.
 package main
@@ -90,6 +91,13 @@ func main() {
 		"setAutoSlow": js.FuncOf(func(this js.Value, args []js.Value) any {
 			if session != nil && len(args) > 0 && args[0].Type() == js.TypeBoolean {
 				session.SetAutoSlow(args[0].Bool())
+			}
+			return nil
+		}),
+		"splitVote": js.FuncOf(func(this js.Value, args []js.Value) any {
+			if session != nil {
+				// SplitVote takes the quorum lock; run it off the JS callback, like kill.
+				go session.SplitVote()
 			}
 			return nil
 		}),

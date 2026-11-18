@@ -50,6 +50,7 @@ const hud = new Hud(document.getElementById("hud")!, source.label, {
   resume: () => source.resume(),
   setTimeScale: (scale) => source.setTimeScale(scale),
   setAutoSlow: (enabled) => source.setAutoSlow(enabled),
+  splitVote: () => source.splitVote(),
 });
 
 const from = new THREE.Vector3();

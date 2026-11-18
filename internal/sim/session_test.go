@@ -835,3 +835,99 @@ func TestCloseDuringSlowWindow(t *testing.T) {
 		t.Errorf("sink received %d events after Close: %+v", len(got), got)
 	}
 }
+
+// AC4.7: SplitVote works while paused: two members start the same term at once and their
+// vote requests wait in flight until Resume. Before Start and after Close it emits nothing.
+func TestSplitVoteWhilePaused(t *testing.T) {
+	t.Parallel()
+	log := &eventLog{}
+	s := New(Config{Members: 3, TimeScale: 1}, log.add)
+	s.SplitVote() // Before Start: no cluster yet
+	if got := log.len(); got != 0 {
+		t.Fatalf("SplitVote before Start emitted %d events: %+v", got, log.since(0))
+	}
+	s.Start()
+	defer s.Close()
+
+	// Wait until a leader is elected and the latest status of every other member is a
+	// live Follower at the leader's term.
+	log.waitFor(t, "a leader", isType(core.EventBecameLeader))
+	deadline := time.Now().Add(10 * time.Second)
+	for !followersAtLatestLeader(log, 3) {
+		if time.Now().After(deadline) {
+			t.Fatalf("members never all followed the latest leader: %+v", log.since(0))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	s.Pause()
+	time.Sleep(300 * time.Millisecond)
+	from := log.len()
+	s.SplitVote()
+	log.indexFrom(t, from, "a second election_started", func() func(core.Event) bool {
+		n := 0
+		return func(e core.Event) bool {
+			if e.Type == core.EventElectionStarted {
+				n++
+			}
+			return n == 2
+		}
+	}())
+	time.Sleep(500 * time.Millisecond)
+
+	var started []core.Event
+	for _, e := range log.since(from) {
+		switch e.Type {
+		case core.EventElectionStarted:
+			started = append(started, e)
+		case core.EventVoteGranted:
+			t.Errorf("vote_granted while paused: %+v", e)
+		}
+	}
+	if len(started) != 2 || started[0].Member == started[1].Member || started[0].Term != started[1].Term {
+		t.Fatalf("election_started while paused = %+v, want two from different members with the same term", started)
+	}
+
+	resumed := log.len()
+	s.Resume()
+	log.waitFrom(t, resumed, "a vote_granted after Resume", isType(core.EventVoteGranted))
+
+	s.Close()
+	closed := log.len()
+	s.SplitVote()
+	time.Sleep(100 * time.Millisecond)
+	if got := log.since(closed); len(got) != 0 {
+		t.Errorf("SplitVote after Close emitted %+v", got)
+	}
+}
+
+// followersAtLatestLeader reports whether, for the latest became_leader event, the latest
+// status of each of the other members shows a live Follower at that leader's term.
+func followersAtLatestLeader(log *eventLog, members int) bool {
+	latest := map[int]core.Event{}
+	var leader core.Event
+	for _, e := range log.since(0) {
+		switch e.Type {
+		case core.EventStatus:
+			latest[e.Member] = e
+		case core.EventBecameLeader:
+			leader = e
+		}
+	}
+	if leader.Type == "" {
+		return false
+	}
+	if st, ok := latest[leader.Member]; !ok || !st.Alive || st.Role != "Leader" || st.Term != leader.Term {
+		return false
+	}
+	for id := 0; id < members; id++ {
+		if id == leader.Member {
+			continue
+		}
+		st, ok := latest[id]
+		if !ok || !st.Alive || st.Role != "Follower" || st.Term != leader.Term {
+			return false
+		}
+	}
+	return true
+}

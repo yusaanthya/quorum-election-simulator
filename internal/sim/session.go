@@ -299,6 +299,19 @@ func (s *Session) Kill(id int) {
 	}
 }
 
+// SplitVote makes two members of the current cluster time out together, so both become
+// candidates for the same term (core.Quorum.SplitVote). It works while paused: both start
+// at once and their vote requests wait in flight until Resume. It does nothing before the
+// first cluster exists or when no two members can be paired.
+func (s *Session) SplitVote() {
+	s.mu.Lock()
+	q := s.quorum
+	s.mu.Unlock()
+	if q != nil {
+		q.SplitVote()
+	}
+}
+
 // Restart replaces the cluster with a fresh one of members members; 0 keeps the current size.
 func (s *Session) Restart(members int) {
 	s.mu.Lock()
