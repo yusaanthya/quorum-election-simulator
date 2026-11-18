@@ -96,7 +96,7 @@ reports a status event if the node's status changed.
 ```mermaid
 flowchart LR
     subgraph session["sim.Session"]
-        ctl["Pause · Resume · SetTimeScale"]
+        ctl["Pause · Resume · SetTimeScale · SetAutoSlow"]
         clock["sim.Clock"]
         run["run loop"]
         obs["ObserverFunc"]
@@ -110,6 +110,7 @@ flowchart LR
     quorum --> member
     clock -- "core.Timer: timer channels, AfterFunc" --> member
     member -- "OnEvent(e)" --> obs
+    obs -- "election_started opens the slow window" --> clock
     quorum -- "Done()" --> run
     obs -- "sink(e)" --> sink["sink<br/>internal/web: SSE hub<br/>cmd/wasm: JavaScript callback"]
     ctl -- "clock events" --> sink
@@ -130,9 +131,16 @@ flowchart LR
   the session chooses the sink: `internal/web` publishes to its SSE hub, and
   `cmd/wasm` hands JSON to JavaScript. The session sends its own `clock` events
   to the same sink.
-- **The session's control does not use events.** It learns that every member
-  has stopped from `Quorum.Done()`, then waits `restartDelay` on its clock
-  before it starts a fresh cluster.
+- **One event opens a slow window.** After forwarding `election_started`, the
+  observer opens a 600 ms window in simulated time, or extends an open one,
+  whether or not automatic slow motion is on. The window ends on time or when
+  the session replaces the cluster.
+- **The switch sets the multiplier.** While a window is open and automatic slow
+  motion is on, the slow-motion factor is 3 times the chosen one. Turning the
+  switch on or off during a window changes the factor at once.
+- **Restarting the cluster does not use events.** The session learns that
+  every member has stopped from `Quorum.Done()`, then waits `restartDelay` on
+  its clock before it starts a fresh cluster.
 
 ## Run modes
 
@@ -144,18 +152,18 @@ build mode.
 - **Go server.** `serve` runs `web.Run` (`internal/web/serve.go`). The browser
   reads `GET /api/events` as Server-Sent Events, starting with a snapshot of
   the running cluster, and sends `POST /api/kill`, `/api/restart`, `/api/pause`,
-  `/api/resume` and `/api/timescale`.
+  `/api/resume`, `/api/timescale` and `/api/autoslow`.
   `ServerSource` is the client.
 - **WebAssembly.** The static site on Cloudflare Pages loads `quorum.wasm`,
   built from `cmd/wasm`, and the simulation runs in the tab. `WasmSource`
-  calls `quorumSim.start`, `kill`, `restart`, `pause`, `resume` and
-  `setTimeScale` and receives each event as a
+  calls `quorumSim.start`, `kill`, `restart`, `pause`, `resume`,
+  `setTimeScale` and `setAutoSlow` and receives each event as a
   JSON string.
 
 The `play` command uses neither: it logs to the terminal and emits no events.
 
 The simulation clock is described in [`sim-clock/`](sim-clock/); its pull
-requests 3 and 4 are still planned.
+request 4 is still planned.
 
 ## Node roles
 
