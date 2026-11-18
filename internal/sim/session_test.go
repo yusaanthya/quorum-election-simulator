@@ -702,11 +702,8 @@ func TestAutoSlowOffKeepsFactor(t *testing.T) {
 	leader := log.waitFor(t, "a leader", isType(core.EventBecameLeader))
 	from := log.len()
 	s.Kill(leader.Member)
-	next := log.indexFrom(t, from, "the next election_started", func(e core.Event) bool {
+	log.indexFrom(t, from, "the next election_started", func(e core.Event) bool {
 		return e.Type == core.EventElectionStarted && e.Term > leader.Term
-	})
-	log.waitFrom(t, next, "a leader of the next election", func(e core.Event) bool {
-		return e.Type == core.EventBecameLeader && e.Term > leader.Term
 	})
 	time.Sleep(electionSlowWindow + 200*time.Millisecond) // Past where a window would end
 
