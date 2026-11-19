@@ -24,7 +24,27 @@ const source: SimSource = wasmMode
 // Ambient occlusion is the costliest pass; skip it on small screens or with ?ao=0.
 const ambientOcclusion = params.get("ao") !== "0" && window.innerWidth >= 640;
 const theme: Theme = academy;
-const stage = new Stage(document.getElementById("scene")!, {
+const sceneEl = document.getElementById("scene")!;
+/** The feed's height while collapsed, so expanding it does not move the scene. */
+let collapsedFeedH = 0;
+/** Matches the phone layout of style.css, where the title card and the dock span the screen. */
+const phoneLayout = window.matchMedia("(max-width: 640px)");
+/** The gap between the title card and the feed, in which phone screens center the stage. */
+function freeBand() {
+  if (!phoneLayout.matches) return null;
+  const card = document.querySelector(".title-card");
+  const feed = document.querySelector(".feed");
+  if (!card || !feed) return null;
+  const feedRect = feed.getBoundingClientRect();
+  if (feed.classList.contains("collapsed")) collapsedFeedH = feedRect.height;
+  const origin = sceneEl.getBoundingClientRect().top;
+  return {
+    top: card.getBoundingClientRect().bottom - origin,
+    bottom: feedRect.bottom - origin - (collapsedFeedH || feedRect.height),
+  };
+}
+const stage = new Stage(sceneEl, {
+  freeBand,
   ambientOcclusion,
   scenery: (scene) => theme.build(scene),
   background: theme.background,
@@ -52,6 +72,8 @@ const hud = new Hud(document.getElementById("hud")!, source.label, {
   setAutoSlow: (enabled) => source.setAutoSlow(enabled),
   splitVote: () => source.splitVote(),
 });
+// The title card is built by the HUD above and changes height with its content; frame the scene again.
+new ResizeObserver(() => stage.resize()).observe(document.querySelector(".title-card")!);
 
 const from = new THREE.Vector3();
 const to = new THREE.Vector3();

@@ -27,6 +27,11 @@ export interface StageOptions {
   lighting?: Lighting;
   /** Bloom strength; absent means no bloom pass. */
   bloom?: number;
+  /**
+   * The free vertical band between the HUD panels, in CSS px from the container's top. Portrait
+   * screens center the orbit center in it; absent or null keeps the fixed offset.
+   */
+  freeBand?: () => { top: number; bottom: number } | null;
 }
 
 const DAYLIGHT = {
@@ -54,7 +59,10 @@ export class Stage {
   private readonly homeDistance: number;
   private fitDistance: number;
 
+  private readonly freeBand?: StageOptions["freeBand"];
+
   constructor(private readonly container: HTMLElement, opts: StageOptions) {
+    this.freeBand = opts.freeBand;
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
@@ -113,10 +121,13 @@ export class Stage {
     this.camera.aspect = w / h;
 
     // The camera renders a window onto a larger view to move the scenery without moving the
-    // orbit center: portrait sits it below the title card, wide screens nudge it right of the card.
+    // orbit center, which lands at the middle of the view: portrait puts it at the middle of the
+    // free band below the title card (view height 2 * center, never under h), wide screens nudge
+    // it right of the card.
     const portrait = w / h < 0.9;
+    const band = portrait ? this.freeBand?.() : null;
     const fullW = !portrait && w > 900 && this.reserveHud ? w + Math.min(320, w * 0.2) : w;
-    const fullH = portrait ? h * 1.12 : h;
+    const fullH = portrait ? (band ? Math.max(h, band.top + band.bottom) : h * 1.12) : h;
     if (fullW !== w || fullH !== h) this.camera.setViewOffset(fullW, fullH, 0, 0, w, h);
     else this.camera.clearViewOffset();
 
