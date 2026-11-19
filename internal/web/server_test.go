@@ -294,7 +294,10 @@ func TestClockEventsConverge(t *testing.T) {
 	time.Sleep(50 * time.Millisecond) // Let the first quorum start
 	events := streamEvents(t, srv)
 
+	// The posting goroutine reports its error on postErr instead of calling t, which it
+	// must not do once the test has returned.
 	posted := make(chan struct{})
+	postErr := make(chan error, 1)
 	go func() {
 		defer close(posted)
 		for i := 0; i < 200; i++ {
@@ -304,13 +307,15 @@ func TestClockEventsConverge(t *testing.T) {
 			}
 			resp, err := http.Post(srv.URL+path, "application/json", nil)
 			if err != nil {
-				t.Error(err)
+				postErr <- err
 				return
 			}
 			resp.Body.Close()
 		}
 	}()
 
+	// A stream that never goes quiet fails here instead of hanging until the go test timeout.
+	deadline := time.After(15 * time.Second)
 	var last *core.Event
 	done := false
 	for {
@@ -326,7 +331,14 @@ func TestClockEventsConverge(t *testing.T) {
 		case <-posted:
 			posted = nil
 			done = true
+			select {
+			case err := <-postErr:
+				t.Fatal(err)
+			default:
+			}
 			continue
+		case <-deadline:
+			t.Fatal("stream did not go quiet within 15s of the first post")
 		case <-time.After(500 * time.Millisecond):
 		}
 		if done {

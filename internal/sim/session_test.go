@@ -13,13 +13,31 @@ type eventLog struct {
 	mu     sync.Mutex
 	events []core.Event
 	at     []time.Time // Wall time at which the sink received each event
+	// simNow, when set before Start, is read for each event; sim keeps what it returned.
+	simNow func() time.Time
+	sim    []time.Time
 }
 
 func (l *eventLog) add(e core.Event) {
+	var sim time.Time
+	if l.simNow != nil {
+		sim = l.simNow()
+	}
 	l.mu.Lock()
 	l.events = append(l.events, e)
 	l.at = append(l.at, time.Now())
+	if l.simNow != nil {
+		l.sim = append(l.sim, sim)
+	}
 	l.mu.Unlock()
+}
+
+// simAt reports the simulated time at which the sink received the event at index i. It
+// needs simNow.
+func (l *eventLog) simAt(i int) time.Time {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.sim[i]
 }
 
 // indexFrom waits for the first event at index from or later that matches and returns
@@ -571,27 +589,29 @@ func TestClockEventOrder(t *testing.T) {
 	}
 }
 
-// C-2, A4, 6.2: automatic slow motion is on by default, every clock event carries the four
-// fields, and SetAutoSlow follows the rules of Pause before Start, while running and after
-// Close.
+// C-2, A4, 6.2: every clock event carries the four fields, and SetAutoSlow follows the
+// rules of Pause before Start (stored, nothing emitted), while running (always emits, also
+// when nothing changes) and after Close (changes nothing, emits nothing). That automatic
+// slow motion is on by default is covered by TestFirstEventIsClock (initial clock event)
+// and TestElectionSlowsClock. Here it stays off from before Start on, so a slow window
+// never adds a clock event of its own.
 func TestSetAutoSlow(t *testing.T) {
 	log := &eventLog{}
 	s := New(Config{Members: 3, TimeScale: 2}, log.add)
 	s.SetAutoSlow(false)
-	s.SetAutoSlow(true)
 	if n := log.len(); n != 0 {
 		t.Fatalf("sink received %d events before Start", n)
 	}
 	s.Start()
-	if got := log.since(0); len(got) == 0 || got[0] != slowClockEvent(false, 2, 2, true) {
-		t.Fatalf("first events = %+v, want clock with factor 2 and autoSlow true", got)
+	if got := log.since(0); len(got) == 0 || got[0] != slowClockEvent(false, 2, 2, false) {
+		t.Fatalf("first events = %+v, want clock with factor 2 and autoSlow false", got)
 	}
 
 	before := len(log.clocks())
-	s.SetAutoSlow(false)
+	s.SetAutoSlow(false) // Changes nothing
 	clocks := log.clocks()
 	if len(clocks) != before+1 || clocks[len(clocks)-1] != slowClockEvent(false, 2, 2, false) {
-		t.Errorf("SetAutoSlow(false) emitted %+v, want one clock event with autoSlow false", clocks[before:])
+		t.Errorf("SetAutoSlow(false) while off emitted %+v, want one clock event with autoSlow false", clocks[before:])
 	}
 	log.waitFor(t, "first quorum", isType(core.EventQuorumStarted))
 	snap := s.Snapshot()
@@ -601,9 +621,13 @@ func TestSetAutoSlow(t *testing.T) {
 
 	s.Close()
 	n := log.len()
-	s.SetAutoSlow(true)
+	s.SetAutoSlow(true) // The opposite of the current value
 	if got := log.since(n); len(got) != 0 {
 		t.Errorf("sink received %d events after Close: %+v", len(got), got)
+	}
+	snap = s.Snapshot()
+	if last := snap[len(snap)-1]; last != slowClockEvent(false, 2, 2, false) {
+		t.Errorf("Snapshot() after SetAutoSlow(true) after Close ends with %+v, want the clock state unchanged (factor 2, autoSlow false)", last)
 	}
 }
 
@@ -728,6 +752,121 @@ func waitSlowed(t *testing.T) (*Session, *eventLog) {
 	return s, log
 }
 
+// E11: a second election_started at a later simulated instant inside an open window extends
+// the window to electionSlowWindow after it, not after the first, and emits no clock event.
+// Split votes while paused place both elections at known simulated instants; a short run
+// between them moves simulated time forward by less than a message latency.
+func TestSecondElectionExtendsSlowWindow(t *testing.T) {
+	t.Parallel()
+	const members = 5
+	log := &eventLog{}
+	s := New(Config{Members: members, TimeScale: 1}, log.add)
+	log.simNow = s.clock.Now
+	s.Start()
+	defer s.Close()
+
+	// A stable leader, and the window of the elections that chose it over.
+	log.waitFor(t, "a leader", isType(core.EventBecameLeader))
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		snap := s.Snapshot()
+		if followersAtLatestLeader(log, members) && snap[len(snap)-1].Factor == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no stable leader with the window over: %+v", log.since(0))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	s.Pause()
+	if snap := s.Snapshot(); snap[len(snap)-1].Factor != 1 {
+		t.Fatalf("window open before the first split vote: %+v", snap[len(snap)-1])
+	}
+	from := log.len()
+	s.SplitVote()
+	first := log.indexFrom(t, from, "the first split vote's election_started", isType(core.EventElectionStarted))
+	t0 := log.simAt(first)
+	open := log.indexFrom(t, from, "the clock event that opens the window", func(e core.Event) bool {
+		return e.Type == core.EventClock && e.Factor == 3
+	})
+	if got, want := log.since(open)[0], slowClockEvent(true, 1, 3, true); got != want {
+		t.Fatalf("clock event that opens the window = %+v, want %+v", got, want)
+	}
+
+	// Simulated time moves on by about 100ms, inside the window and below minLatency, so
+	// the candidates of the first split vote are still eligible for the second.
+	s.Resume()
+	time.Sleep(300 * time.Millisecond)
+	s.Pause()
+	if snap := s.Snapshot(); snap[len(snap)-1].Factor != 3 {
+		t.Fatalf("window closed before the second split vote: %+v", snap[len(snap)-1])
+	}
+
+	from = log.len()
+	clocksBefore := len(log.clocks())
+	s.SplitVote()
+	second := log.indexFrom(t, from, "the second split vote's election_started", isType(core.EventElectionStarted))
+	t1 := log.simAt(second)
+	if !t1.After(t0) || t1.Sub(t0) >= electionSlowWindow {
+		t.Fatalf("second election_started %v after the first, want later and inside the window", t1.Sub(t0))
+	}
+	if got := log.clocks()[clocksBefore:]; len(got) != 0 {
+		t.Errorf("the second election_started emitted clock events %+v, want none", got)
+	}
+	s.mu.Lock()
+	end := s.windowEnd
+	s.mu.Unlock()
+	if want := t1.Add(electionSlowWindow); !end.Equal(want) {
+		t.Errorf("window end = second election + %v, want + %v", end.Sub(t1), electionSlowWindow)
+	}
+
+	// Run until the window ends and measure its end in simulated time.
+	resumed := log.len()
+	s.Resume()
+	back := log.indexFrom(t, resumed, "the clock event that ends the window", func(e core.Event) bool {
+		return e.Type == core.EventClock && e.Factor == 1
+	})
+	for _, e := range log.since(resumed)[:back-resumed] {
+		if e.Type == core.EventElectionStarted {
+			t.Fatalf("another election_started before the window ended: %+v", e)
+		}
+	}
+	// Between opening and end, only the Resume, Pause and Resume commands emit clock events.
+	var between []core.Event
+	for _, e := range log.since(open + 1)[:back-open-1] {
+		if e.Type == core.EventClock {
+			between = append(between, e)
+		}
+	}
+	wantBetween := []core.Event{
+		slowClockEvent(false, 1, 3, true),
+		slowClockEvent(true, 1, 3, true),
+		slowClockEvent(false, 1, 3, true),
+	}
+	if len(between) != len(wantBetween) {
+		t.Errorf("clock events while the window was open = %+v, want %+v", between, wantBetween)
+	} else {
+		for i := range wantBetween {
+			if between[i] != wantBetween[i] {
+				t.Errorf("clock event %d while the window was open = %+v, want %+v", i, between[i], wantBetween[i])
+			}
+		}
+	}
+	if got, want := log.since(back)[0], slowClockEvent(false, 1, 1, true); got != want {
+		t.Errorf("clock event that ends the window = %+v, want %+v", got, want)
+	}
+
+	ended := log.simAt(back)
+	if ended.Before(t1.Add(electionSlowWindow)) {
+		t.Errorf("window ended %v after the second election_started (%v after the first), want at least %v after the second",
+			ended.Sub(t1), ended.Sub(t0), electionSlowWindow)
+	}
+	if late := ended.Sub(t1); late > electionSlowWindow+200*time.Millisecond {
+		t.Errorf("window ended %v after the second election_started, want about %v", late, electionSlowWindow)
+	}
+}
+
 // AC3.4: a pause freezes the window; commands while paused apply the effective factor, and
 // the window emits nothing on its own while paused.
 func TestPauseFreezesSlowWindow(t *testing.T) {
@@ -819,6 +958,11 @@ func TestCloseDuringSlowWindow(t *testing.T) {
 	t.Parallel()
 	s, log := waitSlowed(t)
 
+	// The window must still be open when Close starts, or the test would not exercise it.
+	snap := s.Snapshot()
+	if last := snap[len(snap)-1]; last.Type != core.EventClock || last.Factor != electionSlowdown*last.TimeScale {
+		t.Fatalf("Snapshot() before Close ends with %+v, want an open window (factor %d times timeScale)", last, electionSlowdown)
+	}
 	closed := make(chan struct{})
 	go func() {
 		s.Close()
