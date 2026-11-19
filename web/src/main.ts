@@ -24,7 +24,42 @@ const source: SimSource = wasmMode
 // Ambient occlusion is the costliest pass; skip it on small screens or with ?ao=0.
 const ambientOcclusion = params.get("ao") !== "0" && window.innerWidth >= 640;
 const theme: Theme = academy;
-const stage = new Stage(document.getElementById("scene")!, {
+const sceneEl = document.getElementById("scene")!;
+/** Matches the phone layout of style.css, where the title card and the dock span the screen. */
+const phoneLayout = window.matchMedia("(max-width: 640px)");
+/**
+ * The gap between the title card and the feed, in which phone screens center the stage. The
+ * feed counts at its collapsed height, so expanding it does not move the scene.
+ */
+function freeBand() {
+  if (!phoneLayout.matches) return null;
+  const card = document.querySelector(".title-card");
+  const feed = document.querySelector(".feed");
+  if (!card || !feed) return null;
+  const origin = sceneEl.getBoundingClientRect().top;
+  return {
+    top: card.getBoundingClientRect().bottom - origin,
+    bottom: feed.getBoundingClientRect().bottom - origin - collapsedHeight(feed),
+  };
+}
+/**
+ * Measures a hidden collapsed copy of the feed beside it, so the answer holds also while the
+ * feed is open (as after turning a phone from landscape), and the feed's own rows do not
+ * replay their entry animation as toggling its class would.
+ */
+function collapsedHeight(feed: Element) {
+  const probe = feed.cloneNode(true) as HTMLElement;
+  probe.classList.add("collapsed");
+  probe.removeAttribute("aria-label");
+  probe.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
+  probe.style.cssText = "position: absolute; left: 0; right: 0; bottom: 0; visibility: hidden";
+  feed.parentElement!.appendChild(probe);
+  const h = probe.getBoundingClientRect().height;
+  probe.remove();
+  return h;
+}
+const stage = new Stage(sceneEl, {
+  freeBand,
   ambientOcclusion,
   scenery: (scene) => theme.build(scene),
   background: theme.background,
@@ -52,6 +87,8 @@ const hud = new Hud(document.getElementById("hud")!, source.label, {
   setAutoSlow: (enabled) => source.setAutoSlow(enabled),
   splitVote: () => source.splitVote(),
 });
+// The title card is built by the HUD above and changes height with its content; frame the scene again.
+new ResizeObserver(() => stage.resize()).observe(document.querySelector(".title-card")!);
 
 const from = new THREE.Vector3();
 const to = new THREE.Vector3();
