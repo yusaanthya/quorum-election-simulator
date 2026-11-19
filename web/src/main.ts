@@ -25,23 +25,38 @@ const source: SimSource = wasmMode
 const ambientOcclusion = params.get("ao") !== "0" && window.innerWidth >= 640;
 const theme: Theme = academy;
 const sceneEl = document.getElementById("scene")!;
-/** The feed's height while collapsed, so expanding it does not move the scene. */
-let collapsedFeedH = 0;
 /** Matches the phone layout of style.css, where the title card and the dock span the screen. */
 const phoneLayout = window.matchMedia("(max-width: 640px)");
-/** The gap between the title card and the feed, in which phone screens center the stage. */
+/**
+ * The gap between the title card and the feed, in which phone screens center the stage. The
+ * feed counts at its collapsed height, so expanding it does not move the scene.
+ */
 function freeBand() {
   if (!phoneLayout.matches) return null;
   const card = document.querySelector(".title-card");
   const feed = document.querySelector(".feed");
   if (!card || !feed) return null;
-  const feedRect = feed.getBoundingClientRect();
-  if (feed.classList.contains("collapsed")) collapsedFeedH = feedRect.height;
   const origin = sceneEl.getBoundingClientRect().top;
   return {
     top: card.getBoundingClientRect().bottom - origin,
-    bottom: feedRect.bottom - origin - (collapsedFeedH || feedRect.height),
+    bottom: feed.getBoundingClientRect().bottom - origin - collapsedHeight(feed),
   };
+}
+/**
+ * Measures a hidden collapsed copy of the feed beside it, so the answer holds also while the
+ * feed is open (as after turning a phone from landscape), and the feed's own rows do not
+ * replay their entry animation as toggling its class would.
+ */
+function collapsedHeight(feed: Element) {
+  const probe = feed.cloneNode(true) as HTMLElement;
+  probe.classList.add("collapsed");
+  probe.removeAttribute("aria-label");
+  probe.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
+  probe.style.cssText = "position: absolute; left: 0; right: 0; bottom: 0; visibility: hidden";
+  feed.parentElement!.appendChild(probe);
+  const h = probe.getBoundingClientRect().height;
+  probe.remove();
+  return h;
 }
 const stage = new Stage(sceneEl, {
   freeBand,
