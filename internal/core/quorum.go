@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"math/rand"
+	"sort"
 	"sync"
 	"time"
 
@@ -244,4 +246,67 @@ func (q *Quorum) Snapshot() []Event {
 		events = append(events, statusEvent(m.Status(), m.IsAlive()))
 	}
 	return events
+}
+
+// SplitVote makes two members time out together, so both become candidates for the same
+// term and race for votes. It picks two eligible members (alive, running, not halted, not
+// leader, below raft.MaxElectionFailures) that share a term, the highest such term, and
+// applies an ordinary election timeout to the lower ID, then to the higher ID. Every member
+// stays locked from the eligibility check to the second timeout, so either both start an
+// election or nothing changes, both start the same term, and no event is handled between
+// the two. It returns false, having changed nothing, when no such pair exists.
+func (q *Quorum) SplitVote() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	// Every path that takes a member lock and q.mu takes q.mu first, and no other code
+	// holds two member locks, so taking them all in ascending ID order cannot deadlock.
+	ids := make([]int, 0, len(q.members))
+	for id := range q.members {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	for _, id := range ids {
+		q.members[id].mu.Lock()
+	}
+	defer func() {
+		for _, id := range ids {
+			q.members[id].mu.Unlock()
+		}
+	}()
+
+	byTerm := make(map[int][]*Member)
+	for _, id := range ids {
+		m := q.members[id]
+		// Node state is read directly: Status and Stop take m.mu themselves.
+		s := m.node.Status()
+		if m.ctx.Err() != nil || m.electionTimer == nil || s.Halted || s.Role == raft.Leader || s.ElectionFailures >= raft.MaxElectionFailures {
+			continue
+		}
+		byTerm[s.Term] = append(byTerm[s.Term], m)
+	}
+	term := -1
+	for t, ms := range byTerm {
+		if len(ms) >= 2 && t > term {
+			term = t
+		}
+	}
+	if term < 0 {
+		return false
+	}
+
+	// Members were appended in ascending ID order, so a < b keeps the lower ID first.
+	pool := byTerm[term]
+	a := rand.Intn(len(pool))
+	b := rand.Intn(len(pool) - 1)
+	if b >= a {
+		b++
+	}
+	if a > b {
+		a, b = b, a
+	}
+	logrus.Infof("Split vote: members %d and %d time out together at term %d", pool[a].ID, pool[b].ID, term)
+	pool[a].handleLocked(pool[a].node.OnElectionTimeout)
+	pool[b].handleLocked(pool[b].node.OnElectionTimeout)
+	return true
 }

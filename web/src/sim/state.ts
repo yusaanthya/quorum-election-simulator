@@ -1,5 +1,8 @@
 import type { Role, SimEvent } from "./events";
 
+/** Mirrors raft.MaxElectionFailures: a member that has failed this many elections is not paired by a split vote. */
+export const MAX_ELECTION_FAILURES = 5;
+
 export interface MemberState {
   id: number;
   role: Role;
@@ -35,6 +38,17 @@ export class ClusterState {
 
   get leader(): MemberState | undefined {
     return this.members.find((m) => m.alive && m.role === "Leader");
+  }
+
+  /** Whether a split vote can find a pair: at least two live, non-halted, non-leader members below the failure limit share a term. */
+  get canSplitVote(): boolean {
+    const seen = new Set<number>();
+    for (const m of this.members) {
+      if (!m.alive || m.halted || m.role === "Leader" || m.failures >= MAX_ELECTION_FAILURES) continue;
+      if (seen.has(m.term)) return true;
+      seen.add(m.term);
+    }
+    return false;
   }
 
   /** Applies e and reports whether the cluster was replaced by a new one. */

@@ -238,6 +238,14 @@ func TestAutoSlowValidation(t *testing.T) {
 	}
 }
 
+// AC4.8: split-vote takes no body and answers 204.
+func TestSplitVote(t *testing.T) {
+	srv := newTestServer(t)
+	if got := post(t, srv, "/api/split-vote", ``); got != http.StatusNoContent {
+		t.Errorf("POST /api/split-vote = %d, want %d", got, http.StatusNoContent)
+	}
+}
+
 // AC2.11: a client connecting while paused gets the snapshot ending with a paused clock.
 func TestEventStreamSnapshotEndsWithClock(t *testing.T) {
 	srv, session := newTestServerSession(t)

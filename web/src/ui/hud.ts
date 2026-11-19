@@ -7,6 +7,7 @@ export interface HudActions {
   resume(): void;
   setTimeScale(scale: number): void;
   setAutoSlow(enabled: boolean): void;
+  splitVote(): void;
 }
 
 type Tone = "info" | "vote" | "good" | "bad";
@@ -57,6 +58,7 @@ export class Hud {
   private readonly scaleButtons: HTMLButtonElement[] = [];
   private readonly pauseBtn: HTMLButtonElement;
   private readonly autoSlowBtn: HTMLButtonElement;
+  private readonly splitVoteBtn: HTMLButtonElement;
   private readonly feedToggle: HTMLButtonElement;
   private readonly legendToggle: HTMLButtonElement;
   private readonly sourceText: HTMLElement;
@@ -101,6 +103,8 @@ export class Hud {
         </div>
         <div class="controls">
           <button type="button" class="btn" data-action="auto-slow" aria-pressed="true">選舉時自動放慢</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn" data-action="split-vote" title="讓兩位成員在同一任期同時參選。若沒有人拿到過半票（過半以總成員數計），逾時後會進入下一任期">兩位同時參選</button>
         </div>
         <p class="conn" data-k="conn"><i></i><span data-k="source"></span></p>
       </section>
@@ -165,6 +169,8 @@ export class Hud {
     this.pauseBtn.addEventListener("click", () => (this.paused ? actions.resume() : actions.pause()));
     this.autoSlowBtn = root.querySelector('[data-action="auto-slow"]')!;
     this.autoSlowBtn.addEventListener("click", () => actions.setAutoSlow(!this.autoSlow));
+    this.splitVoteBtn = root.querySelector('[data-action="split-vote"]')!;
+    this.splitVoteBtn.addEventListener("click", () => actions.splitVote());
 
     // The feed starts collapsed to its latest line on phones; the legend is a pop-up there.
     this.feedToggle = root.querySelector('[data-action="feed"]')!;
@@ -202,6 +208,8 @@ export class Hud {
   }
 
   update(state: ClusterState) {
+    // Before the early return: the key below does not cover failure counts.
+    this.splitVoteBtn.disabled = !state.canSplitVote;
     const leader = state.leader;
     const kinds = state.members.map(memberKind);
     const key = `${state.term}|${leader?.id}|${kinds.join(",")}`;

@@ -10,6 +10,8 @@ export interface SimSource {
   resume(): void;
   setTimeScale(scale: number): void;
   setAutoSlow(enabled: boolean): void;
+  /** Makes two members time out together; nothing happens when no two can be paired. */
+  splitVote(): void;
 }
 
 export interface SourceOptions {
@@ -51,6 +53,10 @@ export class ServerSource implements SimSource {
   setAutoSlow(enabled: boolean) {
     void post("/api/autoslow", { enabled });
   }
+
+  splitVote() {
+    void post("/api/split-vote");
+  }
 }
 
 async function post(path: string, body?: unknown) {
@@ -73,6 +79,7 @@ interface QuorumSimApi {
   resume(): void;
   setTimeScale(scale: number): void;
   setAutoSlow(enabled: boolean): void;
+  splitVote(): void;
 }
 
 declare global {
@@ -129,6 +136,10 @@ export class WasmSource implements SimSource {
 
   setAutoSlow(enabled: boolean) {
     this.api?.setAutoSlow(enabled);
+  }
+
+  splitVote() {
+    this.api?.splitVote();
   }
 }
 

@@ -1,6 +1,6 @@
 // Package web serves the 3D visualizer: the embedded front end, a Server-Sent Events
 // stream of cluster events, and a small JSON API for kill, restart, pause, resume, the
-// slow-motion factor and automatic slow motion during elections.
+// slow-motion factor, automatic slow motion during elections and the split-vote scenario.
 package web
 
 import (
@@ -88,6 +88,7 @@ func NewServer(session *sim.Session, hub *Hub) *Server {
 	s.mux.HandleFunc("POST /api/resume", s.handleResume)
 	s.mux.HandleFunc("POST /api/timescale", s.handleTimeScale)
 	s.mux.HandleFunc("POST /api/autoslow", s.handleAutoSlow)
+	s.mux.HandleFunc("POST /api/split-vote", s.handleSplitVote)
 	s.mux.Handle("GET /", staticHandler())
 	return s
 }
@@ -214,6 +215,13 @@ func (s *Server) handleAutoSlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.session.SetAutoSlow(*req.Enabled)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSplitVote makes two members time out together. It takes no body and always
+// answers 204, also when no two members can be paired.
+func (s *Server) handleSplitVote(w http.ResponseWriter, r *http.Request) {
+	s.session.SplitVote()
 	w.WriteHeader(http.StatusNoContent)
 }
 
