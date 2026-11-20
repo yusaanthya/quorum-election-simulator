@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 // "." is the entry files directly in web/src (main.ts, concepts.ts).
 const ALLOWED = {
   sim: [],
-  scene: ['sim'],
+  scene: ['sim', 'assets'],
   scenery: ['scene', 'sim'],
   ui: ['sim'],
   '.': ['sim', 'scene', 'scenery', 'ui'],

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cat fur spike</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #ece7f3; font: 12px/1.4 system-ui, sans-serif; }
+    canvas { display: block; touch-action: none; }
+    #stats { position: fixed; left: 8px; top: 8px; padding: 6px 8px; white-space: pre; background: #0009; color: #fff; border-radius: 6px; font-family: ui-monospace, monospace; }
+    .tag { position: fixed; bottom: 12px; padding: 3px 8px; background: #fffc; border-radius: 6px; color: #333; }
+    #tagA { left: 25%; transform: translateX(-50%); }
+    #tagB { left: 75%; transform: translateX(-50%); }
+    .label { position: fixed; transform: translate(-50%, 4px); padding: 2px 7px; background: #fffd; border-radius: 6px; color: #333; white-space: nowrap; pointer-events: none; }
+    #json { position: fixed; left: 8px; top: 72px; width: 230px; height: 90px; font: 10px/1.3 ui-monospace, monospace; opacity: 0.85; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.module.js",
+        "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="stats">loading…</div>
+  <div class="tag" id="tagA">A · normal map + sheen</div>
+  <div class="tag" id="tagB">B · shell fur</div>
+  <textarea id="json" readonly spellcheck="false" aria-label="settings JSON"></textarea>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
