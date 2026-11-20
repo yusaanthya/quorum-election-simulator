@@ -130,9 +130,14 @@ Source rules:
   - objects `Body` and `Tail`
   - `Eye_L`, `Eye_R`, `Whiskers_L` and `Whiskers_R` as children of `Body`
   - the eye-ring material named `M_EyeRing`
-  - the fur material `M_Fur`, with the vertex-colour attribute `Col` for the
-    lighter ears and tail
+  - the fur material `M_Fur`
   - the origins described above
+
+  The GLB also carries a vertex colour: Blender's `Col`, exported as glTF
+  `COLOR_0` on `Body` and `Tail`, holding lighter ears and tail. The
+  approved look does not use it. The spike's materials turn vertex colours
+  off, and the coat colour comes only from the shader (section 5.3). It is
+  not part of the contract.
 
   Any later change to the shape goes back to the owner for a look.
 - The spike that ships the GLB to the app imports it as a Vite asset URL,
@@ -198,16 +203,25 @@ Each coat also has a pattern seed: 1 to 5 in table order.
 layer and every shell evaluate the same colour, so the fur carries the
 pattern.
 
-- **solid:** one colour, with the second colour on the ears and tail.
+- **solid:** one colour, with the second colour tinting the ears only, by
+  distance to the ear tips. The tail stays the base colour. This is what the
+  owner approved in the spike. The concept drawing's lighter tail was not
+  carried over.
 - **patches:** two thresholded low-frequency noise fields over a white base,
   with a white chest. Dark patches stay back from the eyes.
 - **points:** darkening near the ear tips, a face mask and the tail.
 - **bicolour:** a white chest and muzzle with a noisy edge, and a white tail
   tip.
 
-**Members 5 to 8.** The app allows up to 9 members. Members 5 and up reuse
-the five coats in order, with the pattern seed raised by 100 per lap, so
-repeats are not identical.
+**Members 5 to 8.** The app allows up to 9 members. Member `id` uses coat
+`id % 5`, with its pattern seed raised by 100 × `floor(id / 5)`.
+
+Only seed-dependent patterns change on a repeat: the calico patches and the
+British bicolour's white edge. The solid and colour-point branches ignore
+the seed, and so does the strand placement. A repeated Bombay, white or
+Ragdoll therefore looks the same as the original, and the name label tells
+them apart. I accept that, because the owner only defined five coats; it is
+listed in section 9. (My call.)
 
 The "stripes" pattern from the spike is not used by any coat. Do not ship it.
 
@@ -309,14 +323,27 @@ Each cat has its own phase, so they do not move in lockstep.
 - **Public repository.** No absolute local paths in committed files.
 - **Delivery.** Work lands through pull requests, as for every change. Merge
   rules are in `docs/decisions.md` and the owner's conventions.
+  - The owner's phone and desktop check (section 7) must happen before any
+    merge that changes the cats.
+  - If any of this is queued for the night runner, the queue item must set
+    `merge: owner`, so the runner cannot merge before that check.
+  - The approved GLB and the spike scripts exist only on the local branch
+    `spike/fur-cats`. The first implementation branch must bring them into
+    the repository.
 
 ## 7. My calls (builder's defaults; the owner can override)
 
 - **Performance safeguard.** Set by the owner on 2026-11-20: the public site
   must run smoothly on phones too, so the shell count drops automatically
   with member count and screen size. (Owner's decision.)
-  - The count is chosen once per session, before the first member is
-    built, from the member count and the viewport.
+  - The count is chosen on every cast rebuild, before that rebuild builds
+    its first member. The inputs are the member count of that game and the
+    viewport.
+    - The HUD can restart a game with 3, 5 or 7 members on the same page.
+      `main.ts` calls `rebuild(state.size)` on every `quorum_started`, so a
+      count chosen once at load would be wrong after a restart.
+    - The GLB stays loaded and cached. The shell geometry's instance count
+      and the shader's shell uniform are both set from the chosen count.
     - Members can be up to 9.
     - Small screens are under 640 px wide, the same breakpoint as ambient
       occlusion.
@@ -370,6 +397,12 @@ These are recorded here and are not in scope:
   release.
 - **Wasm build cache.** In a sandboxed agent session, `npm run build:pages`
   needed `GOCACHE` pointed at a writable directory.
+- **Repeated coats.** With 6 to 9 members, a repeated Bombay, white or
+  Ragdoll looks the same as the original (section 5.3).
+- **Picking.** Picking raycasts the resting `Body` triangles. The shader
+  moves the visible silhouette during a stretch, so a click on the very
+  edge at full stretch may miss. The builder should check this does not
+  feel broken.
 
 ## 10. References
 
