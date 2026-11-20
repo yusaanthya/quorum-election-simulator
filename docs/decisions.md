@@ -79,3 +79,18 @@ repository treats that session.
 - **The desk uses less than a session may.** By its own procedure it merges
   no pull request on a condition and none that it opened. Widening either
   needs a new entry here first.
+
+## 2026-11-20 - Morning desk runs in a standing window session
+
+The morning desk now fires each day into one standing session that the owner
+keeps as its window, instead of a fresh session per fire (its procedure is
+`maintenance/morning-desk.md` in the owner's harness repository). The entry of
+2026-11-19 applies to each daily run, from the scheduled prompt until the next
+one, not to the session as a whole.
+
+- **Each run is unattended until the owner's first own message after that
+  run's brief**, and only reads this repository until then. A message the
+  owner sent in an earlier run does not count for a later one, so yesterday's
+  request never merges today's pull request.
+- **A pull request the desk opened** is one it opened in the current run. The
+  rest of the 2026-11-19 entry is unchanged.
