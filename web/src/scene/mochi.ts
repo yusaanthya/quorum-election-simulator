@@ -5,6 +5,7 @@ import { Sigil } from "./magic";
 import { palette } from "./palette";
 import { buildCat, type Cat } from "./cat";
 import { U, mochiDeform } from "./fur";
+import { HopSchedule } from "./hop";
 
 export { beginCast, loadCatModel } from "./cat";
 
@@ -33,7 +34,6 @@ const LAMP_LIFT = 0.55;
 const G = 9.8;
 const KQ = 350; // squash spring is fixed and snappy; the wobble is the top lag
 const CQ = 17;
-const HOP_INTERVAL = 1.8;
 const HOP_HEIGHT = 0.3;
 const SQUASH = 1;
 const WOBBLE_STIFFNESS = 120;
@@ -139,10 +139,8 @@ export class Mochi {
   private readonly phase = Math.random() * Math.PI * 2;
   private sleep = 0; // 0 awake, 1 asleep (stopped)
   // Bounce state: hop phase, height and speed, squash, top lag and tail springs.
-  private simT = 0;
   private hopState: "idle" | "crouch" | "push" | "air" = "idle";
-  /** First hop offset by the cat's phase, so candidates from the start do not hop in step. */
-  private nextHop = (this.phase / (Math.PI * 2)) * HOP_INTERVAL;
+  private readonly hopClock = new HopSchedule(this.phase);
   private crouchEnd = 0;
   private y = 0;
   private v = 0;
@@ -318,17 +316,18 @@ export class Mochi {
 
   /** One substep of the fur spike's bounce: hop cycle, squash spring, top lag and tail. */
   private step(h: number, hopping: boolean) {
-    this.simT += h;
-    if (this.hopState === "idle" && hopping && this.simT >= this.nextHop) {
+    const takeoff = this.hopClock.tick(h, hopping, this.hopState === "idle");
+    const simT = this.hopClock.simT;
+    if (takeoff) {
       this.hopState = "crouch";
-      this.crouchEnd = this.simT + 0.1;
+      this.crouchEnd = simT + 0.1;
       this.qT = 0.1 * SQUASH; // anticipation crouch
     }
-    if (this.hopState === "crouch" && this.simT >= this.crouchEnd) {
+    if (this.hopState === "crouch" && simT >= this.crouchEnd) {
       this.hopState = "push"; // stretch up while the base is still on the ground
       this.qT = -0.16 * SQUASH;
     }
-    if (this.hopState === "push" && this.simT >= this.crouchEnd + 0.06) {
+    if (this.hopState === "push" && simT >= this.crouchEnd + 0.06) {
       const v0 = Math.sqrt(2 * G * HOP_HEIGHT);
       this.hopState = "air";
       this.v = v0;
@@ -345,7 +344,7 @@ export class Mochi {
         this.y = 0;
         this.v = 0;
         this.hopState = "idle";
-        this.nextHop = this.simT + HOP_INTERVAL;
+        this.hopClock.landed();
         this.qV += impact * 1.9 * SQUASH; // base spreads, top flattens
         this.lagV -= impact * 0.34 * SQUASH; // top keeps falling, then wobbles back
         this.tailV += impact * 0.8;
