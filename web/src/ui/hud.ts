@@ -38,6 +38,14 @@ const chevron = svg(`<path d="M6.5 9.5l5.5 5.5 5.5-5.5" fill="none" stroke-width
 
 const ROLE_TEXT: Record<string, string> = { leader: "隊長", candidate: "候選人", follower: "追隨者", down: "停止" };
 
+/**
+ * Formats a clock factor for display with at most two decimals and no trailing zeros,
+ * so a fractional factor such as 1.1 * 3 shows 3.3 rather than 3.3000000000000003.
+ */
+export function formatFactor(factor: number): string {
+  return String(Math.round(factor * 100) / 100);
+}
+
 function memberKind(m: MemberState): string {
   return m.alive ? m.role.toLowerCase() : "down";
 }
@@ -198,8 +206,8 @@ export class Hud {
     this.pauseBtn.setAttribute("aria-pressed", String(paused));
     this.autoSlowBtn.setAttribute("aria-pressed", String(autoSlow));
     this.scaleButtons.forEach((b) => b.classList.toggle("active", Number(b.dataset.scale) === timeScale));
-    const election = factor !== timeScale ? `（選舉中 ${factor}x）` : "";
-    this.sourceText.textContent = `${this.sourceLabel}${paused ? " · 已暫停" : ""} · 慢動作 ${timeScale}x${election}`;
+    const election = factor !== timeScale ? `（選舉中 ${formatFactor(factor)}x）` : "";
+    this.sourceText.textContent = `${this.sourceLabel}${paused ? " · 已暫停" : ""} · 慢動作 ${formatFactor(timeScale)}x${election}`;
   }
 
   setConnected(connected: boolean) {
