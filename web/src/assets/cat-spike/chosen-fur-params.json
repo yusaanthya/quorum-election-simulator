@@ -1,0 +1,15 @@
+{
+  "_note": "Owner's chosen look: variant B (shell fur), tuned on 2026-11-20 with cat_v2.glb. Read off the owner's screenshot.",
+  "shells": 22,
+  "furLength_m": 0.071,
+  "density_per_m": 135,
+  "strandThickness": 0.46,
+  "rootDarkness": 0.42,
+  "tipRim": 0.8,
+  "gravity": 0.43,
+  "wind": 0.19,
+  "normalStrength": 0.94,
+  "normalTilesPerM": 9,
+  "bodyColour": "model (#3f3d5c)",
+  "observed": "60 fps (vsync cap) at 1920x945, one cat per variant, 43 draw calls, 218,696 tris; 5-cat toggle not tried"
+}

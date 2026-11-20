@@ -2,7 +2,8 @@ import "@fontsource/nunito/latin-600.css";
 import "@fontsource/nunito/latin-800.css";
 import "./style.css";
 import * as THREE from "three";
-import { Mochi } from "./scene/mochi";
+import { shellCount } from "./scene/coats";
+import { Mochi, beginCast, loadCatModel } from "./scene/mochi";
 import { PacketSystem } from "./scene/packets";
 import { Sparkles } from "./scene/sparkles";
 import { Stage } from "./scene/stage";
@@ -99,6 +100,7 @@ function rebuild(n: number) {
     b.dispose();
   }
   packets.clear();
+  beginCast(shellCount(n, window.innerWidth, params.get("shells")));
   beans = Array.from({ length: n }, (_, id) => {
     const bean = new Mochi(id, theme.memberLook);
     theme.dress?.(bean);
@@ -222,6 +224,8 @@ function renderLoop(time?: number) {
   stage.render();
 }
 
+// Members are built from the cat model, so it loads before the first event arrives.
+await loadCatModel();
 source
   .connect(onEvent, (connected) => hud.setConnected(connected))
   .catch((err) => {

@@ -9,7 +9,7 @@ export const lineup: Theme = {
   background: ["#f1eef4", "#dcd6e3", "#c2bad0"],
   standRadius: 0,
   layout: (i, n) => {
-    const x = (i - (n - 1) / 2) * 1.35;
+    const x = (i - (n - 1) / 2) * 1.65;
     return [x, -Math.abs(x) * 0.12];
   },
   build(scene) {
