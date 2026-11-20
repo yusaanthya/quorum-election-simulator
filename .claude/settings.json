@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "blender-agent-skills": {
+      "source": {
+        "source": "github",
+        "repo": "EL4CTEO/blender-skills"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "blender-agent-skills@blender-agent-skills": true
+  }
+}
