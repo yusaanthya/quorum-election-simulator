@@ -94,3 +94,14 @@ one, not to the session as a whole.
   request never merges today's pull request.
 - **A pull request the desk opened** is one it opened in the current run. The
   rest of the 2026-11-19 entry is unchanged.
+
+## 2026-11-21 - Runner merges carry an Auto-Merged-By line
+
+Owner decision. When the night runner squash-merges a pull request
+([night-runner.md](night-runner.md), section 6, action 5), the squash
+commit's message changes from GitHub's default, the list of the branch's
+commits, to the one line `Auto-Merged-By: quorum-night-runner`. The owner's
+morning desk recognizes scheduled merges by that line (its procedure is
+`maintenance/morning-desk.md` in the owner's harness repository); merges the
+owner makes carry no such line. The merge conditions do not change, and the
+"Merged by the night runner at" line in the pull request body stays.
