@@ -335,7 +335,8 @@ npm run deploy:pages            # rebuilds and uploads to the quorum-kitties Pag
 Pushes to `main` deploy automatically via
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml), which requires the
 `CLOUDFLARE_API_TOKEN` (Cloudflare Pages: Edit) and `CLOUDFLARE_ACCOUNT_ID`
-repository secrets. Pull requests run the same checks without deploying, and
+secrets of the `production` environment, which is limited to the `main`
+branch. Pull requests run the same checks without deploying, and
 the manual deploy commands above still work.
 
 ## Tests and CI
