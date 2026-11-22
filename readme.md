@@ -434,3 +434,5 @@ simulation clock.
 Built with [Cobra](https://github.com/spf13/cobra) for CLI commands,
 [Logrus](https://github.com/sirupsen/logrus) for logging, and
 [three.js](https://threejs.org/) for the visualizer.
+
+<!-- policy check: temporary line, PR will be closed unmerged -->
