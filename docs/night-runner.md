@@ -311,7 +311,9 @@ Actions, first match wins:
    head contains the current `main` commit, no section 4.2 path is changed,
    and GitHub reports the pull request mergeable. Read the head SHA and both
    results once more, then squash-merge with the pull request title as the
-   commit title, passing that head SHA so a newer head refuses the merge. Add
+   commit title and the one line `Auto-Merged-By: quorum-night-runner` as the
+   commit message, passing that head SHA so a newer head refuses the merge.
+   The message is a parameter of the merge call, not a new write. Add
    "Merged by the night runner at <UTC ISO 8601>." under `## Review fixes`.
    If the merge is refused, prefix the title `[NEEDS-DECISION] ` and add
    "Merge refused: <response or reason>." Stop tending.

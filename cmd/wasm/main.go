@@ -46,6 +46,14 @@ func main() {
 			session = sim.New(cfg, func(e core.Event) {
 				data, err := json.Marshal(e)
 				if err == nil {
+					// The session can call this sink for a clock event while it holds its
+					// lock s.mu: in Start, in changeClock (Pause, Resume, SetTimeScale,
+					// SetAutoSlow), and when the slow window opens or ends (openWindow,
+					// endWindowIfDue, run). A synchronous call from onEvent to a quorumSim
+					// function whose Session method takes s.mu (pause, resume, setTimeScale,
+					// setAutoSlow, restart) would then deadlock; kill and splitVote are safe
+					// because they run on a goroutine. JavaScript should defer such calls
+					// until onEvent returns, for example with queueMicrotask or setTimeout.
 					onEvent.Invoke(string(data))
 				}
 			})

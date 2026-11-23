@@ -79,3 +79,29 @@ repository treats that session.
 - **The desk uses less than a session may.** By its own procedure it merges
   no pull request on a condition and none that it opened. Widening either
   needs a new entry here first.
+
+## 2026-11-20 - Morning desk runs in a standing window session
+
+The morning desk now fires each day into one standing session that the owner
+keeps as its window, instead of a fresh session per fire (its procedure is
+`maintenance/morning-desk.md` in the owner's harness repository). The entry of
+2026-11-19 applies to each daily run, from the scheduled prompt until the next
+one, not to the session as a whole.
+
+- **Each run is unattended until the owner's first own message after that
+  run's brief**, and only reads this repository until then. A message the
+  owner sent in an earlier run does not count for a later one, so yesterday's
+  request never merges today's pull request.
+- **A pull request the desk opened** is one it opened in the current run. The
+  rest of the 2026-11-19 entry is unchanged.
+
+## 2026-11-21 - Runner merges carry an Auto-Merged-By line
+
+Owner decision. When the night runner squash-merges a pull request
+([night-runner.md](night-runner.md), section 6, action 5), the squash
+commit's message changes from GitHub's default, the list of the branch's
+commits, to the one line `Auto-Merged-By: quorum-night-runner`. The owner's
+morning desk recognizes scheduled merges by that line (its procedure is
+`maintenance/morning-desk.md` in the owner's harness repository); merges the
+owner makes carry no such line. The merge conditions do not change, and the
+"Merged by the night runner at" line in the pull request body stays.

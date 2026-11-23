@@ -3,7 +3,11 @@ import { CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import type { MemberState } from "../sim/state";
 import { Sigil } from "./magic";
 import { palette } from "./palette";
-import { mulberry32 } from "./random";
+import { buildCat, type Cat } from "./cat";
+import { U, mochiDeform } from "./fur";
+import { HopSchedule } from "./hop";
+
+export { beginCast, loadCatModel } from "./cat";
 
 /** How members' lamp and floor sigils are tuned for a scene. */
 export interface MemberLook {
@@ -20,83 +24,24 @@ export interface MemberLook {
 const TIMER_SEGMENTS = 72;
 const ROLE_LABEL: Record<string, string> = { Follower: "追隨者", Candidate: "候選人", Leader: "隊長" };
 
-// ---------------------------------------------------------------------------
-// Body: one sculpted piece, a soft bell with two rounded ears raised out of the
-// dome, like a vinyl figure. Width about 1.06, height about 1.1 plus the ears.
-// ---------------------------------------------------------------------------
+/** Height of the name tag over the ear tips and their fur, or over the leader's lamp. */
+const LABEL_LIFT = 0.42;
+const LABEL_LIFT_LEADER = 0.72;
+/** Lamp height over the head. */
+const LAMP_LIFT = 0.55;
 
-const DOME_TOP = 1.1;
-/** Height of the head between the ears; the crown sits here. */
-export const BODY_H = DOME_TOP;
-/** Height of the name tag over the head: just clear of the ears, or of the leader's lamp. */
-const LABEL_LIFT = 0.55;
-const LABEL_LIFT_LEADER = 0.85;
-const EYE_Y = 0.71;
-const EYE_X = 0.115;
-
-const bodyGeometry = (() => {
-  // Silhouette from the base to the crown of the head, resampled evenly so UVs are smooth.
-  const outline = new THREE.CatmullRomCurve3(
-    [
-      [0, 0],
-      [0.3, 0],
-      [0.45, 0.012],
-      [0.515, 0.06],
-      [0.535, 0.13],
-      [0.52, 0.24],
-      [0.5, 0.4],
-      [0.482, 0.56],
-      [0.445, 0.75],
-      [0.36, 0.93],
-      [0.2, 1.06],
-      [0, DOME_TOP],
-    ].map(([r, y]) => new THREE.Vector3(r, y, 0)),
-    false,
-    "centripetal",
-  );
-  const profile = outline.getSpacedPoints(90).map((p) => new THREE.Vector2(Math.max(0, p.x), p.y));
-  profile[0].x = 0;
-  profile[profile.length - 1].x = 0;
-  // phiStart = -PI puts the front (+z) in the middle of the texture, away from the seam.
-  const g = new THREE.LatheGeometry(profile, 128, -Math.PI, Math.PI * 2);
-
-  // Raise the ears out of the dome: a smooth bump around each ear axis, thinner front to back.
-  const center = new THREE.Vector3(0, 0.58, 0);
-  const ears = [-1, 1].map((s) => new THREE.Vector3(s * 0.56, 0.82, 0.05).normalize());
-  const flat = (v: THREE.Vector3) => new THREE.Vector3(v.x, v.y, v.z * 2.4).normalize();
-  const earsFlat = ears.map(flat);
-  const p = g.attributes.position;
-  const v = new THREE.Vector3();
-  const n = new THREE.Vector3();
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i);
-    if (v.y < 0.55) continue;
-    n.copy(v).sub(center).normalize();
-    const nf = flat(n);
-    let bump = 0;
-    for (const e of earsFlat) {
-      const ang = Math.acos(THREE.MathUtils.clamp(nf.dot(e), -1, 1));
-      bump += Math.exp(-Math.pow(ang / 0.3, 2.2));
-    }
-    v.addScaledVector(n, bump * 0.2);
-    p.setXYZ(i, v.x, v.y, v.z);
-  }
-  g.computeVertexNormals();
-  return g;
-})();
-
-/** Where a feature at (x, y) on the front lands on the body, with the surface normal. */
-const surface = (() => {
-  const mesh = new THREE.Mesh(bodyGeometry);
-  const ray = new THREE.Raycaster();
-  return (x: number, y: number) => {
-    ray.set(new THREE.Vector3(x, y, 3), new THREE.Vector3(0, 0, -1));
-    const hit = ray.intersectObject(mesh, false)[0];
-    const point = hit ? hit.point : new THREE.Vector3(x, y, 0.5);
-    const normal = hit?.face ? hit.face.normal.clone() : new THREE.Vector3(0, 0, 1);
-    return { point, normal };
-  };
-})();
+// Mochi bounce, from the fur spike's defaults: hop cycle, squash spring, top-lag spring, tail spring.
+const G = 9.8;
+const KQ = 350; // squash spring is fixed and snappy; the wobble is the top lag
+const CQ = 17;
+const HOP_HEIGHT = 0.3;
+const SQUASH = 1;
+const WOBBLE_STIFFNESS = 120;
+const WOBBLE_DAMPING = 6;
+/** A received message lands like a small hop's impact, in m/s. */
+const BUMP_IMPACT = 1;
+/** Stopped members slump into this much squash. */
+const SLEEP_SQUASH = 0.12;
 
 // ---------------------------------------------------------------------------
 // Crown: one piece. A thick band with rounded edges whose upper rim swells into
@@ -148,15 +93,12 @@ function crownGeometry() {
 
 // Geometry and materials shared by every member.
 const shared = {
-  eye: new THREE.SphereGeometry(1, 20, 14),
-  line: new THREE.CapsuleGeometry(1, 1, 4, 8),
   crown: crownGeometry(),
   pearl: new THREE.SphereGeometry(1, 16, 12),
   lamp: new THREE.SphereGeometry(0.06, 18, 14),
-  ring: new THREE.RingGeometry(0.62, 0.72, TIMER_SEGMENTS, 1),
+  // The inner edge clears the widest furry body (0.598 + 0.095 of fur) at rest.
+  ring: new THREE.RingGeometry(0.72, 0.82, TIMER_SEGMENTS, 1),
 
-  ink: new THREE.MeshStandardMaterial({ color: palette.ink, roughness: 0.45 }),
-  whisker: new THREE.MeshStandardMaterial({ color: "#6d6268", roughness: 0.6 }),
   crownMat: new THREE.MeshPhysicalMaterial({ color: palette.crown, roughness: 0.36, metalness: 0.3, clearcoat: 0.3, clearcoatRoughness: 0.4 }),
   pearlMat: new THREE.MeshPhysicalMaterial({ color: "#fbf4e8", roughness: 0.28, sheen: 0.6, sheenColor: new THREE.Color("#ffe9f0") }),
   gemMats: ["#e8a0ae", "#9fd3c2", "#b9a8e6"].map((c) => new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.15 })),
@@ -170,18 +112,19 @@ const TIMER_GLOW = 1.4;
 const timerFull = new THREE.Color(palette.timerFull);
 const timerLow = new THREE.Color(palette.timerLow);
 
-/** One cluster member: a small rounded cat figure with a quiet face. */
+const tmp = new THREE.Vector3();
+
+/** One cluster member: a furry mochi cat. */
 export class Mochi {
   readonly root = new THREE.Group();
   /** Raycast target for clicks. */
   readonly hitMesh: THREE.Mesh;
-  /** Squashes and stretches with the body; add accessories here. */
+  /** Carries the cat and its accessories: tilts in sleep and grows on hover. */
   readonly squash = new THREE.Group();
 
   private readonly hop = new THREE.Group();
-  private readonly bodyMat: THREE.MeshPhysicalMaterial;
-  private readonly openEyes: THREE.Object3D[] = [];
-  private readonly closedEyes: THREE.Object3D[] = [];
+  private readonly cat: Cat;
+  private readonly crownRest: THREE.Vector3;
   private readonly crown = new THREE.Group();
   private readonly lamp: THREE.Mesh;
   private readonly light: THREE.PointLight;
@@ -195,8 +138,19 @@ export class Mochi {
 
   private readonly phase = Math.random() * Math.PI * 2;
   private sleep = 0; // 0 awake, 1 asleep (stopped)
-  private bump = 0;
-  private pop = 0;
+  // Bounce state: hop phase, height and speed, squash, top lag and tail springs.
+  private hopState: "idle" | "crouch" | "push" | "air" = "idle";
+  private readonly hopClock = new HopSchedule(this.phase);
+  private crouchEnd = 0;
+  private y = 0;
+  private v = 0;
+  private q = 0;
+  private qV = 0;
+  private qT = 0;
+  private lag = 0;
+  private lagV = 0;
+  private tailA = 0;
+  private tailV = 0;
   private crownScale = 0;
   private lampLevel = 0;
   private readonly lampHeight: number;
@@ -213,37 +167,27 @@ export class Mochi {
   constructor(readonly id: number, look?: MemberLook) {
     this.lampHeight = look?.lampHeight ?? 0.5;
     this.lampIntensity = look?.lampIntensity ?? 2;
-    this.bodyMat = new THREE.MeshPhysicalMaterial({
-      map: coatTexture(id),
-      roughness: 0.5,
-      sheen: 0.2,
-      sheenRoughness: 0.6,
-      sheenColor: new THREE.Color("#ffffff"),
-      clearcoat: 0.15,
-      clearcoatRoughness: 0.5,
-    });
 
     this.root.add(this.hop);
     this.hop.add(this.squash);
 
-    const mesh = new THREE.Mesh(bodyGeometry, this.bodyMat);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.userData.memberId = id;
-    this.hitMesh = mesh;
-    this.squash.add(mesh);
+    this.cat = buildCat(id);
+    this.cat.body.userData.memberId = id;
+    this.hitMesh = this.cat.body;
+    this.squash.add(this.cat.root);
 
-    this.buildFace();
+    // The crown sits on the fur between the ears.
+    this.crownRest = new THREE.Vector3(0, this.cat.headTop + this.cat.furLength - 0.05, 0);
     this.buildCrown();
     this.squash.add(this.crown);
 
     // A small warm lamp floats over the leader and lights the floor around it.
     this.lamp = new THREE.Mesh(shared.lamp, shared.lampMat);
-    this.lamp.position.y = BODY_H + 0.55;
+    this.lamp.position.y = this.cat.headTop + LAMP_LIFT;
     this.lamp.scale.setScalar(0);
     this.root.add(this.lamp);
     this.light = new THREE.PointLight(palette.lamp, 0, 3.2, 1.6);
-    this.light.position.y = BODY_H + this.lampHeight;
+    this.light.position.y = this.cat.headTop + this.lampHeight;
     this.root.add(this.light);
 
     // Floor: election countdown ring, and sigils for campaigning and leading.
@@ -264,17 +208,25 @@ export class Mochi {
     this.label = document.createElement("div");
     this.label.className = "member-label";
     this.labelObj = new CSS2DObject(this.label);
-    this.labelObj.position.y = BODY_H + LABEL_LIFT;
+    this.labelObj.position.y = this.labelBase();
     this.root.add(this.labelObj);
+  }
+
+  /** Name tag height: over the ear tips and their fur. */
+  private labelBase() {
+    return this.cat.bodyH + this.cat.furLength + LABEL_LIFT;
   }
 
   /** World position where messages leave and land. */
   anchor(target: THREE.Vector3) {
-    return this.root.getWorldPosition(target).setY(BODY_H * (0.55 - this.sleep * 0.15));
+    return this.root.getWorldPosition(target).setY(this.cat.headTop * (0.55 - this.sleep * 0.15));
   }
 
+  /** A message lands: a small impact, like the end of a hop. */
   receive() {
-    this.bump = 1;
+    this.qV += BUMP_IMPACT * 1.9 * SQUASH;
+    this.lagV -= BUMP_IMPACT * 0.34 * SQUASH;
+    this.tailV += BUMP_IMPACT * 0.8;
   }
 
   setHover(on: boolean) {
@@ -283,8 +235,7 @@ export class Mochi {
 
   dispose() {
     this.label.remove();
-    this.bodyMat.map?.dispose();
-    this.bodyMat.dispose();
+    for (const m of this.cat.materials) m.dispose();
     this.timerMat.dispose();
     this.timerRing.geometry.dispose();
     for (const s of [this.campaignSigil, this.leaderSigil]) s.dispose();
@@ -294,7 +245,12 @@ export class Mochi {
     const alive = m.alive;
     const role = alive ? m.role : "Down";
     if (role !== this.lastRole) {
-      if (this.lastRole) this.pop = 1;
+      // A role change pops: a quick stretch with the top leading.
+      if (this.lastRole) {
+        this.qV -= 1.6 * SQUASH;
+        this.lagV += 0.4 * SQUASH;
+        this.tailV += 0.5;
+      }
       this.lastRole = role;
     }
 
@@ -302,42 +258,50 @@ export class Mochi {
     this.root.rotation.y = lerpAngle(this.root.rotation.y, yaw, 1 - Math.exp(-dt * 5));
 
     this.sleep = damp(this.sleep, alive ? 0 : 1, 5, dt);
-    this.bump = damp(this.bump, 0, 8, dt);
-    this.pop = damp(this.pop, 0, 3.5, dt);
     this.hover = damp(this.hover, this.hovered && alive ? 1 : 0, 12, dt);
 
-    // Slow breathing; candidates bob; stopped members slump a little.
-    let lift = 0;
-    let breathe = Math.sin(t * 1.8 + this.phase) * 0.01;
-    if (alive && m.role === "Candidate") {
-      const h = Math.abs(Math.sin(t * 3.6 + this.phase));
-      lift = h * 0.09;
-      breathe = (h - 0.5) * 0.035;
-    }
-    this.hop.position.y = lift;
-    const sy = (1 + breathe) * (1 - this.bump * 0.07) * (1 - this.sleep * 0.12) * (1 + Math.sin(this.pop * Math.PI) * 0.05);
-    const sxz = (1 / Math.sqrt(sy)) * (1 + this.hover * 0.05);
-    this.squash.scale.set(sxz, sy * (1 + this.hover * 0.05), sxz);
+    // Candidates hop; stopped members slump a little; everyone breathes.
+    const hopping = alive && m.role === "Candidate";
+    const n = Math.ceil(dt * 240);
+    for (let i = 0; i < n; i++) this.step(dt / n, hopping);
+    const q = THREE.MathUtils.clamp(this.q, -0.4, 0.5) + 0.012 * Math.sin(t * 1.8 + this.phase);
+    const cat = this.cat;
+    cat.u.uSquash.value = q;
+    cat.u.uLag.value = this.lag;
+    U.uTime.value = t;
+    this.hop.position.y = this.y;
+    // The tail pivot rides the deformed surface; the tail itself swings on its own spring.
+    cat.tail.position.copy(cat.tailRest).add(mochiDeform(cat.tailRest, q, this.lag, cat.bodyH, tmp));
+    cat.tail.quaternion.setFromAxisAngle(cat.tailAxis, this.tailA);
+    this.squash.scale.setScalar(1 + this.hover * 0.05);
     // Stopped members tilt their head, dozing off.
     this.squash.rotation.z = this.sleep * 0.14;
 
     const sleeping = this.sleep >= 0.5;
-    this.openEyes.forEach((e) => (e.visible = !sleeping));
-    this.closedEyes.forEach((e) => (e.visible = sleeping));
-    this.bodyMat.color.lerp(alive ? white : sleepyTint, 1 - Math.exp(-dt * 3));
+    cat.eyes.forEach((e) => (e.visible = !sleeping));
+    cat.lids.forEach((e) => (e.visible = sleeping));
+    for (const mat of cat.furMats) mat.color.lerp(alive ? white : sleepyTint, 1 - Math.exp(-dt * 3));
 
+    // The crown and the lamp ride the deformed top of the head.
+    const head = mochiDeform(this.crownRest, q, this.lag, cat.bodyH, tmp).y;
     const leading = alive && m.role === "Leader";
     this.crownScale = damp(this.crownScale, leading && this.crownEnabled ? 1 : 0, 7, dt);
     this.crown.scale.setScalar(this.crownScale);
     this.crown.visible = this.crownScale > 0.01;
+    this.crown.position.y = this.crownRest.y + head;
 
     this.lampLevel = damp(this.lampLevel, leading ? 1 : 0, 3, dt);
     this.lamp.scale.setScalar(this.lampLevel);
     this.lamp.visible = this.lampLevel > 0.01;
-    this.lamp.position.y = BODY_H + 0.55 + Math.sin(t * 1.6) * 0.04;
+    this.lamp.position.y = cat.headTop + LAMP_LIFT + this.y + head + Math.sin(t * 1.6) * 0.04;
+    this.light.position.y = cat.headTop + this.lampHeight + this.y + head;
     this.light.intensity = this.lampLevel * this.lampIntensity;
     // The name tag stays close to the ears, and rises above the lamp while leading.
-    this.labelObj.position.y = BODY_H + LABEL_LIFT + this.lampLevel * (LABEL_LIFT_LEADER - LABEL_LIFT);
+    this.labelObj.position.y = this.labelBase() + this.lampLevel * (LABEL_LIFT_LEADER - LABEL_LIFT);
+
+    // The deformation works in cat space.
+    cat.root.updateWorldMatrix(true, false);
+    cat.u.uCatInv.value.copy(cat.root.matrixWorld).invert();
 
     this.campaign = damp(this.campaign, alive && m.role === "Candidate" ? 1 : 0, 6, dt);
     this.campaignSigil.opacity = this.campaign * (0.75 + Math.sin(t * 3) * 0.15);
@@ -348,6 +312,50 @@ export class Mochi {
 
     this.updateTimer(dt, m, now, alive, noLeader);
     this.updateLabel(m);
+  }
+
+  /** One substep of the fur spike's bounce: hop cycle, squash spring, top lag and tail. */
+  private step(h: number, hopping: boolean) {
+    const takeoff = this.hopClock.tick(h, hopping, this.hopState === "idle");
+    const simT = this.hopClock.simT;
+    if (takeoff) {
+      this.hopState = "crouch";
+      this.crouchEnd = simT + 0.1;
+      this.qT = 0.1 * SQUASH; // anticipation crouch
+    }
+    if (this.hopState === "crouch" && simT >= this.crouchEnd) {
+      this.hopState = "push"; // stretch up while the base is still on the ground
+      this.qT = -0.16 * SQUASH;
+    }
+    if (this.hopState === "push" && simT >= this.crouchEnd + 0.06) {
+      const v0 = Math.sqrt(2 * G * HOP_HEIGHT);
+      this.hopState = "air";
+      this.v = v0;
+      this.qT = 0;
+      this.qV -= v0 * SQUASH; // keep stretching through takeoff
+      this.lagV += v0 * 0.17 * SQUASH; // top leads
+      this.tailV += v0 * 0.8;
+    }
+    if (this.hopState === "air") {
+      this.v -= G * h;
+      this.y += this.v * h;
+      if (this.y <= 0) {
+        const impact = -this.v;
+        this.y = 0;
+        this.v = 0;
+        this.hopState = "idle";
+        this.hopClock.landed();
+        this.qV += impact * 1.9 * SQUASH; // base spreads, top flattens
+        this.lagV -= impact * 0.34 * SQUASH; // top keeps falling, then wobbles back
+        this.tailV += impact * 0.8;
+      }
+    }
+    this.qV += (-KQ * (this.q - (this.qT + this.sleep * SLEEP_SQUASH)) - CQ * this.qV) * h;
+    this.q += this.qV * h;
+    this.lagV += (-WOBBLE_STIFFNESS * this.lag - WOBBLE_DAMPING * this.lagV) * h;
+    this.lag += this.lagV * h;
+    this.tailV += (-WOBBLE_STIFFNESS * 0.6 * this.tailA - WOBBLE_DAMPING * 0.6 * this.tailV) * h;
+    this.tailA += this.tailV * h;
   }
 
   private updateTimer(dt: number, m: MemberState, now: number, alive: boolean, noLeader: boolean) {
@@ -378,44 +386,8 @@ export class Mochi {
     this.label.title = `成員 ${m.id} · Term ${m.term}`;
   }
 
-  /** Two small matte eyes set close and high, and fine whiskers. No mouth. */
-  private buildFace() {
-    const onSurface = (x: number, y: number, lift: number) => {
-      const { point, normal } = surface(x, y);
-      const g = new THREE.Group();
-      g.position.copy(point).addScaledVector(normal, lift);
-      g.lookAt(g.position.clone().add(normal));
-      this.squash.add(g);
-      return g;
-    };
-    for (const side of [-1, 1]) {
-      const open = onSurface(side * EYE_X, EYE_Y, -0.004);
-      const eye = new THREE.Mesh(shared.eye, shared.ink);
-      eye.scale.set(0.031, 0.043, 0.014);
-      open.add(eye);
-      this.openEyes.push(open);
-
-      const closed = onSurface(side * EYE_X, EYE_Y - 0.01, -0.002);
-      const lid = new THREE.Mesh(shared.line, shared.ink);
-      lid.scale.set(0.009, 0.045, 0.009);
-      lid.rotation.z = Math.PI / 2;
-      closed.add(lid);
-      closed.visible = false;
-      this.closedEyes.push(closed);
-
-      // Two whiskers per side, angled slightly apart.
-      for (const [dy, tilt] of [[0.0, 0.1], [-0.045, -0.08]] as const) {
-        const w = onSurface(side * 0.255, EYE_Y - 0.075 + dy, -0.002);
-        const hair = new THREE.Mesh(shared.line, shared.whisker);
-        hair.scale.set(0.0055, 0.05, 0.0055);
-        hair.rotation.z = Math.PI / 2 + side * tilt;
-        w.add(hair);
-      }
-    }
-  }
-
   private buildCrown() {
-    this.crown.position.y = BODY_H - 0.05;
+    this.crown.position.copy(this.crownRest);
     const band = new THREE.Mesh(shared.crown, shared.crownMat);
     band.castShadow = true;
     this.crown.add(band);
@@ -435,144 +407,6 @@ export class Mochi {
     this.crown.rotation.set(-0.1, 0, 0.08); // Worn at a slight, jaunty angle
     this.crown.scale.setScalar(0);
   }
-}
-
-// ---------------------------------------------------------------------------
-// Coats. The texture wraps the body: x = around (front at the center), y = from
-// the top of the head (0) to the base (H).
-// ---------------------------------------------------------------------------
-
-type Coat = { base: string; draw?: (ctx: CanvasRenderingContext2D, W: number, H: number, rand: () => number) => void };
-
-const COATS: Coat[] = [
-  { base: "#f7f2ea" }, // Cream, plain like a little ghost
-  {
-    base: "#f7f1e7", // Calico: ginger over one eye and ear, a brown patch on the back
-    draw: (ctx, W, H, rand) => {
-      blob(ctx, W * 0.33, H * 0.17, W * 0.09, H * 0.2, "#e2ae7c", rand); // Over the left ear and eye
-      blob(ctx, W * 0.08, H * 0.42, W * 0.1, H * 0.2, "#8d7262", rand);
-      blob(ctx, W * 0.82, H * 0.62, W * 0.08, H * 0.16, "#e2ae7c", rand);
-    },
-  },
-  {
-    base: "#cfcbcf", // Grey tabby: stripes over the head and back
-    draw: (ctx, W, H) => stripes(ctx, W, H, "#a59fa6"),
-  },
-  {
-    base: "#f3d6b4", // Ginger tabby with a pale chest
-    draw: (ctx, W, H) => {
-      stripes(ctx, W, H, "#e3b07f");
-      soft(ctx, W * 0.5, H * 0.72, W * 0.09, H * 0.28, "#fbf3ea");
-    },
-  },
-  {
-    base: "#f5ede3", // Colorpoint: ears and face fade to warm brown
-    draw: (ctx, W, H) => {
-      const g = ctx.createLinearGradient(0, 0, 0, H * 0.32);
-      g.addColorStop(0, "rgba(184, 156, 136, 0.85)");
-      g.addColorStop(1, "rgba(184, 156, 136, 0)");
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, W, H * 0.32);
-      soft(ctx, W * 0.5, H * 0.3, W * 0.05, H * 0.07, "rgba(190, 162, 142, 0.45)");
-    },
-  },
-  {
-    base: "#e2e4ea", // Blue-grey with a white bib
-    draw: (ctx, W, H) => soft(ctx, W * 0.5, H * 0.75, W * 0.1, H * 0.3, "#f6f6f8"),
-  },
-];
-
-function coatTexture(id: number) {
-  const W = 1024;
-  const H = 512;
-  const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext("2d")!;
-  const coat = COATS[id % COATS.length];
-  ctx.fillStyle = coat.base;
-  ctx.fillRect(0, 0, W, H);
-  coat.draw?.(ctx, W, H, mulberry32(id + 1));
-  // A faint warm shade toward the base, like light falling off a figure.
-  const g = ctx.createLinearGradient(0, H * 0.5, 0, H);
-  g.addColorStop(0, "rgba(120, 90, 80, 0)");
-  g.addColorStop(1, "rgba(120, 90, 80, 0.12)");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  return tex;
-}
-
-/** An organic patch, slightly irregular. */
-function blob(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, color: string, rand: () => number) {
-  const pts = 9;
-  const radii = Array.from({ length: pts }, () => 0.75 + rand() * 0.4);
-  const at = (i: number) => {
-    const a = (i / pts) * Math.PI * 2;
-    const r = radii[((i % pts) + pts) % pts];
-    return [x + Math.cos(a) * rx * r, y + Math.sin(a) * ry * r] as const;
-  };
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  for (let i = 0; i <= pts; i++) {
-    const [x0, y0] = at(i);
-    const [x1, y1] = at(i + 1);
-    const mx = (x0 + x1) / 2;
-    const my = (y0 + y1) / 2;
-    if (i === 0) ctx.moveTo(mx, my);
-    else ctx.quadraticCurveTo(x0, y0, mx, my);
-  }
-  ctx.closePath();
-  ctx.fill();
-}
-
-/** A soft-edged oval patch, drawn with a gradient (canvas filters are slow). */
-function soft(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, color: string) {
-  const c = new THREE.Color().setStyle(color.replace(/rgba\(([^,]+,[^,]+,[^,]+),[^)]*\)/, "rgb($1)"));
-  const alpha = /rgba\(.*,\s*([\d.]+)\)/.exec(color)?.[1] ?? "1";
-  const rgb = `${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)}`;
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.scale(1, ry / rx);
-  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
-  g.addColorStop(0, `rgba(${rgb}, ${alpha})`);
-  g.addColorStop(0.7, `rgba(${rgb}, ${alpha})`);
-  g.addColorStop(1, `rgba(${rgb}, 0)`);
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(0, 0, rx, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-/** Tabby stripes: short bars on the forehead, longer curved bands around the back. */
-function stripes(ctx: CanvasRenderingContext2D, W: number, H: number, color: string) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineCap = "round";
-  ctx.lineWidth = H * 0.03;
-  for (const dx of [-0.025, 0, 0.025]) {
-    ctx.beginPath();
-    ctx.moveTo(W * (0.5 + dx), H * 0.1);
-    ctx.lineTo(W * (0.5 + dx * 0.8), H * 0.2);
-    ctx.stroke();
-  }
-  ctx.lineWidth = H * 0.035;
-  for (let i = 0; i < 5; i++) {
-    const y = H * (0.28 + i * 0.12);
-    ctx.beginPath();
-    ctx.moveTo(W * 0.15, y - H * 0.04);
-    ctx.quadraticCurveTo(W * 0.0, y + H * 0.02, -W * 0.15, y - H * 0.04);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(W * 1.15, y - H * 0.04);
-    ctx.quadraticCurveTo(W * 1.0, y + H * 0.02, W * 0.85, y - H * 0.04);
-    ctx.stroke();
-  }
-  ctx.restore();
 }
 
 function damp(from: number, to: number, rate: number, dt: number) {

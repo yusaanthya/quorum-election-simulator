@@ -1,7 +1,8 @@
 // Dev-only page for comparing scenery themes: `npm run dev`, then open /concepts.html?theme=academy.
 import "./style.css";
 import * as THREE from "three";
-import { Mochi } from "./scene/mochi";
+import { shellCount } from "./scene/coats";
+import { Mochi, beginCast, loadCatModel } from "./scene/mochi";
 import { PacketSystem } from "./scene/packets";
 import { Stage } from "./scene/stage";
 import type { Role } from "./sim/events";
@@ -65,6 +66,8 @@ const members: MemberState[] = roles.map((r, id) => ({
   timerStart: (r === "Follower" || r === "Candidate") ? now - 600 * id : null,
   timerDurationMs: 6000,
 }));
+await loadCatModel();
+beginCast(shellCount(members.length, window.innerWidth, params.get("shells")));
 const mochis = members.map((m, i) => {
   const mochi = new Mochi(m.id, theme.memberLook);
   theme.dress?.(mochi);
