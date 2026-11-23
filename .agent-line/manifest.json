@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "kit": "f4bbf2a56a52e2251c421e35e69fac6839dfb35c",
+  "checks": ["check"],
+  "codex_clean": "no_blocking",
+  "hold_paths": [
+    "internal/config/config.go",
+    "web/wrangler.toml",
+    "scripts/codex-review-gate.mjs",
+    "scripts/codex-review-gate.test.mjs",
+    "docs/codex-review-gate.md",
+    "docs/night-runner.md",
+    "docs/decisions.md",
+    "docs/**/*-spec.md",
+    "docs/**/*-plan.md",
+    "docs/**/*-requirements.md"
+  ],
+  "lanes": {
+    "runner": {
+      "kind": "queue",
+      "base": "main",
+      "auto_merge": true,
+      "tier": {
+        "default": "hold",
+        "auto": ["cmd/**", "internal/**", "web/**", "scripts/**", "docs/**", "readme.md"],
+        "strong_review": []
+      },
+      "max_changed_lines": null,
+      "marker": "Auto-Merged-By: quorum-night-runner"
+    }
+  }
+}
