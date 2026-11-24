@@ -2,7 +2,7 @@
 import "./style.css";
 import * as THREE from "three";
 import { shellCount } from "./scene/coats";
-import { Mochi, beginCast, loadCatModel } from "./scene/mochi";
+import { Mochi, beginCast, lampLight, loadCatModel } from "./scene/mochi";
 import { PacketSystem } from "./scene/packets";
 import { Stage } from "./scene/stage";
 import type { Role } from "./sim/events";
@@ -48,6 +48,7 @@ if (theme === lineup && params.get("focus") === "leader") {
   stage.camera.position.multiplyScalar(0.84);
 }
 const packets = new PacketSystem(stage.scene, theme.keepClear);
+stage.scene.add(lampLight);
 
 // A frozen moment: member 0 leads, member 2 campaigns, member 4 has stopped.
 const roles: (Role | "Down")[] =

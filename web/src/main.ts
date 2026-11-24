@@ -3,7 +3,7 @@ import "@fontsource/nunito/latin-800.css";
 import "./style.css";
 import * as THREE from "three";
 import { shellCount } from "./scene/coats";
-import { Mochi, beginCast, loadCatModel } from "./scene/mochi";
+import { Mochi, beginCast, lampLight, loadCatModel } from "./scene/mochi";
 import { PacketSystem } from "./scene/packets";
 import { Sparkles } from "./scene/sparkles";
 import { Stage } from "./scene/stage";
@@ -75,6 +75,7 @@ const state = new ClusterState();
 const simClock = new SimClock();
 const packets = new PacketSystem(stage.scene, theme.keepClear);
 const sparkles = new Sparkles(stage.scene);
+stage.scene.add(lampLight);
 let beans: Mochi[] = [];
 /** The role each member last showed, so the theme hears about changes once. */
 let shownRoles: (Role | "Down" | null)[] = [];

@@ -107,6 +107,13 @@ const shared = {
 
 const sleepyTint = new THREE.Color(palette.sleepy);
 const white = new THREE.Color(0xffffff);
+/**
+ * The single point light shared by all lamps. It is created once and added to the scene once, so the
+ * light count (part of every lit shader's program key) never changes with the member count.
+ */
+export const lampLight = new THREE.PointLight(palette.lamp, 0, 3.2, 1.6);
+let lampOwner: Mochi | null = null;
+
 /** Pushes the arc above the bloom threshold so themes with bloom light it softly. */
 const TIMER_GLOW = 1.4;
 const timerFull = new THREE.Color(palette.timerFull);
@@ -127,7 +134,6 @@ export class Mochi {
   private readonly crownRest: THREE.Vector3;
   private readonly crown = new THREE.Group();
   private readonly lamp: THREE.Mesh;
-  private readonly light: THREE.PointLight;
   private readonly timerRing: THREE.Mesh;
   private readonly timerMat: THREE.MeshBasicMaterial;
   private readonly campaignSigil: Sigil;
@@ -186,9 +192,6 @@ export class Mochi {
     this.lamp.position.y = this.cat.headTop + LAMP_LIFT;
     this.lamp.scale.setScalar(0);
     this.root.add(this.lamp);
-    this.light = new THREE.PointLight(palette.lamp, 0, 3.2, 1.6);
-    this.light.position.y = this.cat.headTop + this.lampHeight;
-    this.root.add(this.light);
 
     // Floor: election countdown ring, and sigils for campaigning and leading.
     this.timerMat = new THREE.MeshBasicMaterial({ color: palette.timerFull, transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
@@ -235,6 +238,7 @@ export class Mochi {
 
   dispose() {
     this.label.remove();
+    if (lampOwner === this) lampOwner = null;
     for (const m of this.cat.materials) m.dispose();
     this.timerMat.dispose();
     this.timerRing.geometry.dispose();
@@ -294,8 +298,15 @@ export class Mochi {
     this.lamp.scale.setScalar(this.lampLevel);
     this.lamp.visible = this.lampLevel > 0.01;
     this.lamp.position.y = cat.headTop + LAMP_LIFT + this.y + head + Math.sin(t * 1.6) * 0.04;
-    this.light.position.y = cat.headTop + this.lampHeight + this.y + head;
-    this.light.intensity = this.lampLevel * this.lampIntensity;
+    // The one shared lamp light follows whichever lamp is brightest; it hands over when a rising lamp
+    // overtakes the fading one, so intensity stays continuous.
+    const glow = this.lampLevel * this.lampIntensity;
+    if (lampOwner !== this && glow > (lampOwner ? lampLight.intensity : 0)) lampOwner = this;
+    if (lampOwner === this) {
+      lampLight.position.set(this.root.position.x, cat.headTop + this.lampHeight + this.y + head, this.root.position.z);
+      lampLight.intensity = glow;
+      if (glow <= 0) lampOwner = null;
+    }
     // The name tag stays close to the ears, and rises above the lamp while leading.
     this.labelObj.position.y = this.labelBase() + this.lampLevel * (LABEL_LIFT_LEADER - LABEL_LIFT);
 
