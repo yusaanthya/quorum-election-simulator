@@ -80,6 +80,13 @@ export class PacketSystem {
     };
   }
 
+  /** One packet of each style, for compiling their programs before the first flight. */
+  samples() {
+    const g = new THREE.Group();
+    for (const style of Object.values(this.styles)) g.add(style.make());
+    return g;
+  }
+
   /**
    * Launches a message that left at startMs; it lands durationMs later, the delay the
    * simulation applies to it. Both are on the time base later passed to update.

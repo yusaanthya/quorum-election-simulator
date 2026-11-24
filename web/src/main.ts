@@ -81,6 +81,8 @@ let beans: Mochi[] = [];
 let shownRoles: (Role | "Down" | null)[] = [];
 /** Whether the cat model has loaded; until then events only update the state and the HUD. */
 let castReady = false;
+/** Shader warm-ups in flight. Frames are not drawn meanwhile, so no draw waits for a program link. */
+let warming = 0;
 
 const hud = new Hud(document.getElementById("hud")!, source.label, {
   restart: (n) => source.restart(n),
@@ -116,7 +118,24 @@ function rebuild(n: number) {
     return bean;
   });
   shownRoles = beans.map(() => null);
+  // The members' lamps change the light count, which every lit program is compiled for.
+  warmShaders();
 }
+
+/**
+ * Compiles the programs the scene needs, in parallel where KHR_parallel_shader_compile is
+ * available. compileAsync also visits hidden objects, so the crowns, sleep lids and lamps of
+ * the members are included; the sparkles are always in the scene, and the packets, which only
+ * join the scene in flight, are added as samples while the compile is queued.
+ */
+function warmShaders() {
+  const samples = packets.samples();
+  stage.scene.add(samples);
+  warming++;
+  void stage.renderer.compileAsync(stage.scene, stage.camera).then(() => warming--);
+  stage.scene.remove(samples);
+}
+warmShaders(); // The scenery, before the first frame
 
 function onEvent(e: SimEvent) {
   // Integrate the time up to this event under the clock state that was in force, so the
@@ -230,7 +249,7 @@ function renderLoop(time?: number) {
   packets.update(simClock.now, stage.camera);
   sparkles.update(dt);
   hud.update(state);
-  stage.render();
+  if (warming === 0) stage.render();
 }
 
 // The simulation starts while the cat model loads; members are built from the model, so
