@@ -133,8 +133,8 @@ function warmShaders() {
   stage.scene.add(samples);
   warming++;
   // A failed compile must not stop drawing; the programs then link on first use as before.
-  void stage.renderer
-    .compileAsync(stage.scene, stage.camera)
+  void stage
+    .compileAsync()
     .catch((err) => console.error(err))
     .finally(() => warming--);
   stage.scene.remove(samples);
