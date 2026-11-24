@@ -118,7 +118,7 @@ function rebuild(n: number) {
     return bean;
   });
   shownRoles = beans.map(() => null);
-  // The members' lamps change the light count, which every lit program is compiled for.
+  // Each member brings its own coat materials, whose programs are new to the renderer.
   warmShaders();
 }
 
@@ -132,7 +132,11 @@ function warmShaders() {
   const samples = packets.samples();
   stage.scene.add(samples);
   warming++;
-  void stage.renderer.compileAsync(stage.scene, stage.camera).then(() => warming--);
+  // A failed compile must not stop drawing; the programs then link on first use as before.
+  void stage.renderer
+    .compileAsync(stage.scene, stage.camera)
+    .catch((err) => console.error(err))
+    .finally(() => warming--);
   stage.scene.remove(samples);
 }
 warmShaders(); // The scenery, before the first frame
