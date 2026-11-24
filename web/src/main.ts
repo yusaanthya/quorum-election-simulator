@@ -13,6 +13,7 @@ import { SimClock } from "./sim/clock";
 import type { Role, SimEvent } from "./sim/events";
 import { ServerSource, WasmSource, type SimSource } from "./sim/source";
 import { ClusterState } from "./sim/state";
+import { createFpsMeter } from "./ui/fps";
 import { Hud } from "./ui/hud";
 
 const params = new URLSearchParams(location.search);
@@ -22,8 +23,10 @@ const source: SimSource = wasmMode
   ? new WasmSource({ members: clampNumber(params.get("members"), 1, 9, 5), timeScale })
   : new ServerSource();
 
-// Ambient occlusion is the costliest pass; skip it on small screens or with ?ao=0.
-const ambientOcclusion = params.get("ao") !== "0" && window.innerWidth >= 640;
+// Ambient occlusion is the costliest pass: only on wide screens with a fine pointer (a cheap
+// proxy for a desktop-class GPU, so phones and tablets skip it), and not with ?ao=0.
+const ambientOcclusion =
+  params.get("ao") !== "0" && window.innerWidth >= 640 && window.matchMedia("(pointer: fine)").matches;
 const theme: Theme = academy;
 const sceneEl = document.getElementById("scene")!;
 /** Matches the phone layout of style.css, where the title card and the dock span the screen. */
@@ -197,12 +200,14 @@ canvas.addEventListener("pointermove", (ev) => {
   }
 });
 
+const fpsTick = params.has("fps") ? createFpsMeter() : null;
 const timer = new THREE.Timer();
 timer.connect(document); // Pauses the clock while the tab is hidden
 renderLoop();
 function renderLoop(time?: number) {
   requestAnimationFrame(renderLoop);
   timer.update(time);
+  fpsTick?.(time ?? performance.now());
   const dt = Math.min(timer.getDelta(), 0.1);
   const t = timer.getElapsed();
   simClock.advance(performance.now());
