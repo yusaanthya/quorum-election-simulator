@@ -164,9 +164,11 @@ export class Stage {
     const key = new THREE.DirectionalLight(l.key.color, l.key.intensity);
     key.position.set(-7, 13, 9);
     key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
-    key.shadow.radius = 10;
-    key.shadow.blurSamples = 16;
+    // VSM keeps the cats' shadows smoothly soft. The blur radius is in shadow-map texels, so
+    // half the map size with half the radius keeps the same softness for a quarter of the work.
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.radius = 5;
+    key.shadow.blurSamples = 8;
     key.shadow.bias = -0.0004;
     const s = key.shadow.camera;
     s.left = s.bottom = -8;
