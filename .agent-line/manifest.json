@@ -6,6 +6,10 @@
   "hold_paths": [
     "internal/config/config.go",
     "web/wrangler.toml",
+    "web/vite.config.*",
+    "web/tsconfig*.json",
+    "web/index.html",
+    "web/scripts/**",
     "scripts/codex-review-gate.mjs",
     "scripts/codex-review-gate.test.mjs",
     "docs/codex-review-gate.md",
