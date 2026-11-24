@@ -18,8 +18,10 @@ visitor download and parse two unused `@font-face` blocks. Remove them.
 
 - The two `@fontsource/nunito/...` imports are gone from `web/src/main.ts`,
   and `grep -ri nunito web/src` finds nothing.
-- After `npm run build` in `web/`, no CSS file under `web/dist/` contains
-  `Nunito` or `nunito`, and no `nunito-*.woff2` or `.woff` file is emitted.
+- After `npm run build:pages` and `npm run build` in `web/`, no CSS file under
+  `web/dist-pages/` or `internal/web/dist/` (the two `outDir`s of
+  `web/vite.config.ts`) contains `Nunito` or `nunito`, and neither directory
+  holds a `nunito-*.woff2` or `.woff` file.
 - Page text and fonts are unchanged: `--sans` and `--serif` in
   `web/src/style.css` are untouched.
 - The full check of `docs/night-runner.md` section 4.1 passes.
