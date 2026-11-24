@@ -874,3 +874,17 @@ h2 {
     display: none;
   }
 }
+
+/* ?fps readout: right edge, mid-height, clear of the title card (top) and the dock (bottom) */
+.fps-meter {
+  position: fixed;
+  top: 50%;
+  right: var(--gap, 10px);
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font: 12px/1.4 ui-monospace, monospace;
+  pointer-events: none;
+  z-index: 10;
+}

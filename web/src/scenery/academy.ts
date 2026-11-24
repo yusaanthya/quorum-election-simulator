@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { Motes, Sigil } from "../scene/magic";
 import { roundedCylinder } from "../scene/shapes";
 import { ball, matte, place, roundedBox, type Theme } from "./kit";
@@ -87,14 +88,22 @@ export const academy: Theme = {
     place(scene, crystal, 0, 1.1);
     floaters.push({ obj: crystal, y: 1.1, phase: 0 });
 
-    // Bookshelves curving around the back of the hall.
+    // Bookshelves curving around the back of the hall. They never move, so every part of every
+    // shelf is baked into one vertex-colored mesh: one draw call instead of about 240.
     const units = 7;
+    const parts: THREE.BufferGeometry[] = [];
     for (let i = 0; i < units; i++) {
       const a = BACK + ((i - (units - 1) / 2) / units) * 2.1;
-      const shelf = bookshelf(rand);
-      shelf.rotation.y = -a - Math.PI / 2;
-      place(scene, shelf, Math.cos(a) * 5.85, -0.32, Math.sin(a) * 5.85);
+      const at = new THREE.Matrix4().compose(
+        new THREE.Vector3(Math.cos(a) * 5.85, -0.32, Math.sin(a) * 5.85),
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -a - Math.PI / 2),
+        new THREE.Vector3(1, 1, 1),
+      );
+      parts.push(...bookshelf(rand, at));
     }
+    const shelves = mergeGeometries(parts)!;
+    for (const p of parts) p.dispose();
+    place(scene, new THREE.Mesh(shelves, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 })));
 
     // Floating candles.
     for (let i = 0; i < 7; i++) {
@@ -105,9 +114,10 @@ export const academy: Theme = {
       const flame = ball("#ffdca3", 0.06, 1.4);
       flame.scale.y = 0.09;
       flame.position.y = 0.24;
-      candle.add(flame);
       const y = 2.3 + rand() * 1.1;
       place(scene, candle, Math.cos(a) * r, y, Math.sin(a) * r);
+      // Added after place() so the glowing flame stays out of the shadow map.
+      candle.add(flame);
       floaters.push({ obj: candle, y, phase: rand() * 6 });
     }
     return 6.5;
@@ -123,36 +133,38 @@ export const academy: Theme = {
   },
 };
 
-function bookshelf(rand: () => number) {
-  const g = new THREE.Group();
+/** One bookshelf's parts, each colored and moved into place by `at`, ready to merge. */
+function bookshelf(rand: () => number, at: THREE.Matrix4) {
+  const parts: THREE.BufferGeometry[] = [];
+  const part = (geo: THREE.BufferGeometry, color: string, x: number, y: number, z: number, lean = 0) => {
+    geo.applyMatrix4(new THREE.Matrix4().makeRotationZ(lean).setPosition(x, y, z).premultiply(at));
+    const c = new THREE.Color(color);
+    const n = geo.getAttribute("position").count;
+    const rgb = new Float32Array(n * 3);
+    for (let v = 0; v < n; v++) c.toArray(rgb, v * 3);
+    geo.setAttribute("color", new THREE.BufferAttribute(rgb, 3));
+    parts.push(geo);
+  };
   const w = 1.5;
   const h = 2.5;
   const d = 0.42;
-  const frame = new THREE.Mesh(roundedBox(w, h, d, 0.08), matte(WOOD));
-  frame.position.y = h / 2;
-  g.add(frame);
+  part(roundedBox(w, h, d, 0.08), WOOD, 0, h / 2, 0);
   // Recess for the shelves, slightly lighter.
-  const back = new THREE.Mesh(roundedBox(w - 0.18, h - 0.22, 0.05, 0.02), matte("#332017"));
-  back.position.set(0, h / 2, d / 2 - 0.02);
-  g.add(back);
+  part(roundedBox(w - 0.18, h - 0.22, 0.05, 0.02), "#332017", 0, h / 2, d / 2 - 0.02);
   for (let row = 0; row < 3; row++) {
     const y = 0.22 + row * 0.75;
-    const board = new THREE.Mesh(roundedBox(w - 0.16, 0.06, 0.32, 0.02), matte(WOOD));
-    board.position.set(0, y, d / 2 + 0.04);
-    g.add(board);
+    part(roundedBox(w - 0.16, 0.06, 0.32, 0.02), WOOD, 0, y, d / 2 + 0.04);
     let x = -w / 2 + 0.16;
     while (x < w / 2 - 0.2) {
       const bw = 0.08 + rand() * 0.06;
       const bh = 0.36 + rand() * 0.22;
-      const book = new THREE.Mesh(roundedBox(bw, bh, 0.26, 0.02), matte(BOOKS[Math.floor(rand() * BOOKS.length)]));
+      const color = BOOKS[Math.floor(rand() * BOOKS.length)];
       const lean = rand() < 0.12 ? 0.2 : 0;
-      book.position.set(x + bw / 2, y + 0.03 + bh / 2, d / 2 + 0.06);
-      book.rotation.z = lean;
-      g.add(book);
+      part(roundedBox(bw, bh, 0.26, 0.02), color, x + bw / 2, y + 0.03 + bh / 2, d / 2 + 0.06, lean);
       x += bw + 0.012 + (lean ? 0.06 : 0);
     }
   }
-  return g;
+  return parts;
 }
 
 function auraTexture() {

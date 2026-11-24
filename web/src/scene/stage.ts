@@ -63,8 +63,12 @@ export class Stage {
 
   constructor(private readonly container: HTMLElement, opts: StageOptions) {
     this.freeBand = opts.freeBand;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // The canvas is not anti-aliased: everything renders into the composer's multisampled
+    // target. Pixel ratio is capped at 1.5, and MSAA drops from 4 to 2 samples above 1,
+    // where edges are already finer.
+    this.renderer = new THREE.WebGLRenderer({ antialias: false });
+    const pixelRatio = Math.min(window.devicePixelRatio, 1.5);
+    this.renderer.setPixelRatio(pixelRatio);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.VSMShadowMap;
     this.renderer.toneMapping = THREE.NeutralToneMapping;
@@ -95,7 +99,7 @@ export class Stage {
 
     // Always render through the composer, so tone mapping happens in one place (the output
     // pass) and the additive magic circles look the same with or without ambient occlusion.
-    const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+    const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: pixelRatio > 1 ? 2 : 4 });
     this.composer = new EffectComposer(this.renderer, target);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     if (opts.ambientOcclusion) {
@@ -164,9 +168,11 @@ export class Stage {
     const key = new THREE.DirectionalLight(l.key.color, l.key.intensity);
     key.position.set(-7, 13, 9);
     key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
-    key.shadow.radius = 10;
-    key.shadow.blurSamples = 16;
+    // VSM keeps the cats' shadows smoothly soft. The blur radius is in shadow-map texels, so
+    // half the map size with half the radius keeps the same softness for a quarter of the work.
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.radius = 5;
+    key.shadow.blurSamples = 8;
     key.shadow.bias = -0.0004;
     const s = key.shadow.camera;
     s.left = s.bottom = -8;
