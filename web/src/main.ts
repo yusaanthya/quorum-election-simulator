@@ -79,6 +79,8 @@ stage.scene.add(lampLight);
 let beans: Mochi[] = [];
 /** The role each member last showed, so the theme hears about changes once. */
 let shownRoles: (Role | "Down" | null)[] = [];
+/** Whether the cat model has loaded; until then events only update the state and the HUD. */
+let castReady = false;
 
 const hud = new Hud(document.getElementById("hud")!, source.label, {
   restart: (n) => source.restart(n),
@@ -126,19 +128,20 @@ function onEvent(e: SimEvent) {
     return;
   }
   if (state.apply(e, simClock.now)) {
-    rebuild(state.size);
+    if (castReady) rebuild(state.size);
     hud.log(`新的一局：${e.members} 位成員`, "good");
     return;
   }
-  const bean = beans[e.member];
-  if (!bean) return;
+  if (!state.members[e.member]) return;
+  // Undefined until the cast is built, which skips the packet and sparkle for the event.
+  const bean = beans[e.member] as Mochi | undefined;
 
   switch (e.type) {
     case "message": {
       const target = beans[e.peer];
       // A hidden tab gets no animation frames, so packets spawned there would never
       // expire and would all appear at once when the tab is shown again.
-      if (target && e.message && !document.hidden) {
+      if (bean && target && e.message && !document.hidden) {
         packets.spawn(e.message, e.granted, e.durationMs, bean.anchor(from), target.anchor(to), simClock.now, () => target.receive());
       }
       break;
@@ -151,7 +154,7 @@ function onEvent(e: SimEvent) {
       break;
     case "became_leader":
       hud.log(`成員 ${e.member} 以 ${e.votes} 票當選隊長`, "good");
-      sparkles.burst(bean.root.getWorldPosition(from));
+      if (bean) sparkles.burst(bean.root.getWorldPosition(from));
       break;
     case "lost_quorum":
       hud.log(`成員 ${e.member} 聯絡不到過半成員，退位`, "bad");
@@ -230,8 +233,8 @@ function renderLoop(time?: number) {
   stage.render();
 }
 
-// Members are built from the cat model, so it loads before the first event arrives.
-await loadCatModel();
+// The simulation starts while the cat model loads; members are built from the model, so
+// the cast is built from the state once it has loaded.
 source
   .connect(onEvent, (connected) => hud.setConnected(connected))
   .catch((err) => {
@@ -239,6 +242,9 @@ source
     hud.setConnected(false);
     hud.log(`連線失敗：${err instanceof Error ? err.message : err}`, "bad");
   });
+await loadCatModel();
+castReady = true;
+if (state.size > 0) rebuild(state.size);
 
 function clampNumber(raw: string | null, min: number, max: number, fallback: number) {
   const n = Number(raw);
