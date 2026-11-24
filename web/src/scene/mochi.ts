@@ -238,7 +238,12 @@ export class Mochi {
 
   dispose() {
     this.label.remove();
-    if (lampOwner === this) lampOwner = null;
+    // A rebuild may remove the member holding the light; turn it off so it does not stay lit where
+    // that member stood until a new leader rises.
+    if (lampOwner === this) {
+      lampOwner = null;
+      lampLight.intensity = 0;
+    }
     for (const m of this.cat.materials) m.dispose();
     this.timerMat.dispose();
     this.timerRing.geometry.dispose();
