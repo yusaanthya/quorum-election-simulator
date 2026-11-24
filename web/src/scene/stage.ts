@@ -161,6 +161,19 @@ export class Stage {
     this.labels.render(this.scene, this.camera);
   }
 
+  /**
+   * Compiles the scene's programs in parallel where the browser can. The scene pass renders
+   * into the composer's target, and the program variant depends on the bound target (color
+   * space and tone mapping), so that target is bound while the programs are chosen.
+   */
+  compileAsync() {
+    const previous = this.renderer.getRenderTarget();
+    this.renderer.setRenderTarget(this.composer.readBuffer);
+    const done = this.renderer.compileAsync(this.scene, this.camera);
+    this.renderer.setRenderTarget(previous);
+    return done;
+  }
+
   private addLights(l: Lighting = DAYLIGHT) {
     this.renderer.toneMappingExposure = l.exposure ?? 1.05;
     this.scene.add(new THREE.HemisphereLight(l.hemi.sky, l.hemi.ground, l.hemi.intensity));

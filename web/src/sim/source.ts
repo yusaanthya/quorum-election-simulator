@@ -98,13 +98,14 @@ export class WasmSource implements SimSource {
 
   async connect(onEvent: (e: SimEvent) => void, onStatus: (connected: boolean) => void) {
     const base = import.meta.env.BASE_URL;
+    // Fetch the module while wasm_exec.js loads; instantiating needs the Go runtime it defines.
+    const resp = fetch(`${base}wasm/quorum.wasm`);
     await loadScript(`${base}wasm/wasm_exec.js`);
     if (!window.Go) throw new Error("wasm_exec.js did not define Go");
     const go = new window.Go();
 
     const ready = new Promise<void>((resolve) => window.addEventListener("quorumsim-ready", () => resolve(), { once: true }));
-    const url = `${base}wasm/quorum.wasm`;
-    const { instance } = await instantiate(url, go.importObject);
+    const { instance } = await instantiate(await resp, go.importObject);
     void go.run(instance); // Resolves only when the Go program exits
     await ready;
 
@@ -143,9 +144,8 @@ export class WasmSource implements SimSource {
   }
 }
 
-async function instantiate(url: string, imports: WebAssembly.Imports) {
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`fetch ${url}: ${resp.status}`);
+async function instantiate(resp: Response, imports: WebAssembly.Imports) {
+  if (!resp.ok) throw new Error(`fetch ${resp.url}: ${resp.status}`);
   if (WebAssembly.instantiateStreaming && resp.headers.get("Content-Type")?.includes("application/wasm")) {
     return WebAssembly.instantiateStreaming(resp, imports);
   }
