@@ -323,6 +323,8 @@ Each cat has its own phase, so they do not move in lockstep.
   - Fur cost is mostly overdraw from the shells.
   - The site already skips ambient occlusion on screens under 640 px wide,
     and `?ao=0` turns it off.
+    (Since pull request #62 it also needs a fine pointer, so phones and
+    tablets skip it at any width.)
 - **No new runtime dependencies.** `MeshoptDecoder` ships with three.
 - **Public repository.** No absolute local paths in committed files.
 - **Delivery.** Work lands through pull requests, as for every change. Merge

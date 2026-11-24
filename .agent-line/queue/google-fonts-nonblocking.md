@@ -34,7 +34,7 @@ allows instead of an inline `onload`.
 - The URL still contains `display=swap` and the same families and weights
   (`Noto+Sans+TC:wght@400;500;700` and `Noto+Serif+TC:wght@600`).
 - Verified with Playwright against a built page (`npm run build:pages`, then a
-  static server of `web/dist`; or `npx vite --mode wasm`; allow 90 s
+  static server of `web/dist-pages`; or `npx vite --mode wasm`; allow 90 s
   timeouts): the font stylesheet is not render-blocking (for example the
   `fonts.googleapis.com/css2` entry of
   `performance.getEntriesByType('resource')` reports `renderBlockingStatus` of
