@@ -9,5 +9,27 @@
   },
   "enabledPlugins": {
     "blender-agent-skills@blender-agent-skills": true
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*__merge_pull_request",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -z \"${AGENT_GATE_HOOK:-}\" ] || node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hook-bootstrap.mjs\" https://github.com/yusaanthya/agent-pipeline-kit.git",
+            "onFailure": "block"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "deny": [
+      "mcp__github__enable_pr_auto_merge",
+      "mcp__github__push_files",
+      "mcp__github__create_or_update_file",
+      "mcp__github__delete_file"
+    ]
   }
 }
