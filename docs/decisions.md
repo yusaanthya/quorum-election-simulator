@@ -142,8 +142,10 @@ rest of that entry stands.
     The kit reads the trusted Codex review itself under
     `codex_clean: "no_blocking"` (P0 and P1 block, P2 and P3 do not). A review
     the kit cannot classify (an unknown priority, an unclassifiable summary
-    finding) was a `failure` that a run fixed; it is now `blocked:codex`,
-    left for the owner.
+    finding) stays left for the owner, as the status's `error` was, now as
+    `blocked:codex`. The ruleset on `main` still requires the `check` and
+    `Codex Review Gate` statuses, so a merge the kit allows while that status
+    is not `success` is refused and handled as a refused merge in section 6.
   - A pull request the gate holds is no longer fixed or updated by a run.
     Before, only a section 4.2 path stopped tending; the gate also holds its
     other held paths (for example `web/vite.config.*`), the floor, binaries,

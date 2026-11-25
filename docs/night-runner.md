@@ -278,9 +278,11 @@ the kit gate"):
   way.
 - Run
   `node <kit dir>/src/cli.js evaluate --repo yusaanthya/quorum-election-simulator --pr <n> --repo-dir <checkout>`,
-  where `<checkout>` is the run's checkout of this repository. The `runner`
-  lane is inferred from the head branch. The command prints one JSON object;
-  its `verdict` is one string, `headSha` is the head it evaluated, and
+  where `<kit dir>` is that temporary directory and `<checkout>` is the run's
+  checkout of this repository. The `runner` lane is inferred from the head
+  branch. The command prints one JSON object and exits 1 for every verdict
+  other than `merge`; that exit status is not a failure, so decide from the
+  JSON. Its `verdict` is one string, `headSha` is the head it evaluated, and
   `reasons` lists every failed condition, each with a `verdict` and a `code`.
 
 The verdict and its `reasons` are the only evidence for the actions below,
