@@ -752,7 +752,9 @@ h2 {
     font-size: 11px;
   }
 
+  /* Wrap so a row wider than the card (320 px screens) moves its last button down instead of clipping */
   .controls {
+    flex-wrap: wrap;
     gap: 6px;
     margin-top: 10px;
   }
