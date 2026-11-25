@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "kit": "f4bbf2a56a52e2251c421e35e69fac6839dfb35c",
+  "kit": "3a6181f36c0337240305ada45c51a1ba1c84973d",
   "checks": ["check"],
   "codex_clean": "no_blocking",
   "hold_paths": [
@@ -30,6 +30,7 @@
         "strong_review": []
       },
       "max_changed_lines": null,
+      "max_fix_rounds": 3,
       "marker": "Auto-Merged-By: quorum-night-runner"
     }
   }

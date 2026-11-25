@@ -257,66 +257,84 @@ its branch is called:
 - Its base is `main` and its head branch is `claude/item-<id>` **in this
   repository**. A pull request from a fork is never a runner pull request.
 - `.agent-line/queue/<id>.md` exists on `main` and is valid.
-- The oldest commit of `git log --first-parent <merge base>..<head>` is the
-  empty claim commit `chore: claim <id>` (section 2.3).
 
 Drafts and pull requests with a `[FAILED] ` or `[NEEDS-DECISION] ` prefix are
 the owner's and are skipped; the run moves to the next oldest. The owner takes
 a pull request out of this section by converting it to a draft or adding the
 prefix.
 
-Evidence, all read fresh for the current head SHA:
+**Gate verdict.** For each pull request that is not skipped, the run asks the
+agent-pipeline-kit gate (decision 2026-11-25 "Night runner tending decided by
+the kit gate"):
 
-- `check`: the latest check run of that name on the head.
-- `Codex Review Gate`: the commit status described in
-  [codex-review-gate.md](codex-review-gate.md). `failure` is the only result
-  that starts a fix. `error` is never fixed or worked around by a run.
-- Sensitive paths: section 4.2, from the merge base with `main` to the head.
-- Fix rounds: the number of `Review-fix-round:` trailers in
-  `git log --first-parent --format=%B <merge base>..<head>`.
+- Fetch `origin/main` and read the `kit` value of `.agent-line/manifest.json`
+  on it: a 40-character commit SHA.
+- In a new, empty temporary directory outside the checkout, run `git init`,
+  fetch exactly that commit from
+  `https://github.com/yusaanthya/agent-pipeline-kit.git`
+  (`git fetch --depth 1 <url> <sha>`), check out `FETCH_HEAD` detached, and
+  confirm that `git rev-parse HEAD` prints the pinned SHA. The repository's
+  hook bootstrap (`.claude/hooks/hook-bootstrap.mjs`) fetches the kit the same
+  way.
+- Run
+  `node <kit dir>/src/cli.js evaluate --repo yusaanthya/quorum-election-simulator --pr <n> --repo-dir <checkout>`,
+  where `<checkout>` is the run's checkout of this repository. The `runner`
+  lane is inferred from the head branch. The command prints one JSON object;
+  its `verdict` is one string, `headSha` is the head it evaluated, and
+  `reasons` lists every failed condition, each with a `verdict` and a `code`.
+
+The verdict and its `reasons` are the only evidence for the actions below,
+read fresh for each pull request.
+
+No JSON verdict (the kit cannot be fetched at the pin, or Node, the kit or
+`gh` fails), or a reason with code `collect-failed`, is unknown state under
+section 1: the run exits and reports why, having written nothing.
 
 Actions, first match wins:
 
-1. **Leave for the owner.** Any section 4.2 path is changed; or the item has
-   `merge: owner`; or `Codex Review Gate` is `error`; or 3 fix rounds are used
-   and `check` or `Codex Review Gate` is still `failure`. For the fix-round
-   cap, prefix the title `[NEEDS-DECISION] `, add "Fix-round cap reached; left
-   for the owner." under `## Review fixes`, and stop tending. Otherwise change
-   nothing and move to the next oldest pull request.
-2. **Wait.** `check` or `Codex Review Gate` is missing or pending on the head.
-   Change nothing and move to the next oldest pull request.
-3. **Fix.** `check` or `Codex Review Gate` is `failure` and fewer than 3 fix
-   rounds are used. Check out the branch. If `check` is the failure, first run
-   the full check on the head merged locally with the current `main`; if it
-   passes, the failure did not reproduce: prefix the title
-   `[NEEDS-DECISION] `, add "Check failure did not reproduce on <head>; left
-   for the owner." and stop tending. Otherwise fix only the failing check and
-   the P0 and P1 findings of the trusted reviewer account named in
+1. **Leave for the owner.** A reason has code `fix-round-cap`, or the verdict
+   begins with `hold:` or `blocked:`. For the fix-round cap, prefix the title
+   `[NEEDS-DECISION] `, add "Fix-round cap reached; left for the owner." under
+   `## Review fixes`, and stop tending. Otherwise change nothing and move to
+   the next oldest pull request.
+2. **Wait.** The verdict begins with `wait:`. Change nothing and move to the
+   next oldest pull request.
+3. **Fix.** The verdict is `fix:ci` or `fix:codex`. Check out the branch. If
+   a reason has verdict `fix:ci`, first run the full check on the head merged
+   locally with the current `main`; if it passes, the failure did not
+   reproduce: prefix the title `[NEEDS-DECISION] `, add "Check failure did not
+   reproduce on <head>; left for the owner." and stop tending. Otherwise fix
+   what every reason whose verdict begins with `fix:` names: a `fix:ci` reason
+   is a failing check, and a `fix:codex` reason is a P0 or P1 finding of the
+   trusted reviewer account named in
    [codex-review-gate.md](codex-review-gate.md) on the head. P2 and P3
    findings and every other comment are not acted on. The fix changes no
    section 4.2 path. Commit the fix locally with the trailer
-   `Review-fix-round: <n>`, so that the critic's diff includes it, then run
-   the full check and one critic round on that commit. If either fails, push
-   nothing and discard the local commit: prefix the title
-   `[NEEDS-DECISION] ` and add "Review fix failed: <check or critic item>."
-   Otherwise append one line to `## Review fixes`, push without force, and
-   request a review (below). Stop tending.
-4. **Update.** Every check passes but the head does not contain the current
-   `main` commit. Merge `main` into the branch (a merge commit, never a
-   rebase), run the full check, push without force, and request a review
-   (below). A conflict or a failing check pushes nothing: prefix the title
-   `[NEEDS-DECISION] ` and add "Update from main failed: <conflict or
-   check>." This is not a fix round. Stop tending.
-5. **Merge.** `check` and `Codex Review Gate` are `success` on the head, the
-   head contains the current `main` commit, no section 4.2 path is changed,
-   and GitHub reports the pull request mergeable. Read the head SHA and both
-   results once more, then squash-merge with the pull request title as the
-   commit title and the one line `Auto-Merged-By: quorum-night-runner` as the
-   commit message, passing that head SHA so a newer head refuses the merge.
-   The message is a parameter of the merge call, not a new write. Add
-   "Merged by the night runner at <UTC ISO 8601>." under `## Review fixes`.
-   If the merge is refused, prefix the title `[NEEDS-DECISION] ` and add
-   "Merge refused: <response or reason>." Stop tending.
+   `Review-fix-round: <n>`, where `<n>` is one more than the number of lines
+   beginning with `Review-fix-round:` in
+   `git log --first-parent --format=%B <merge base>..<head>`, so that the
+   critic's diff includes it, then run the full check and one critic round on
+   that commit. If either fails, push nothing and discard the local commit:
+   prefix the title `[NEEDS-DECISION] ` and add "Review fix failed: <check or
+   critic item>." Otherwise append one line to `## Review fixes`, push without
+   force, and request a review (below). Stop tending.
+4. **Update.** The verdict is `update:base`. Merge `main` into the branch (a
+   merge commit, never a rebase), run the full check, push without force, and
+   request a review (below). A conflict or a failing check pushes nothing:
+   prefix the title `[NEEDS-DECISION] ` and add "Update from main failed:
+   <conflict or check>." This is not a fix round. Stop tending.
+5. **Merge.** The verdict is `merge`. The run merges only when
+   `AGENT_GATE_HOOK` is non-empty in its environment, because only then does
+   the repository hook re-check the merge call with the kit. Otherwise it
+   changes nothing, names the pull request in the run summary and moves to the
+   next oldest pull request. When the variable is set, squash-merge with the
+   pull request title as the commit title and the one line
+   `Auto-Merged-By: quorum-night-runner` as the commit message, passing the
+   verdict's `headSha` so a newer head refuses the merge. The message is a
+   parameter of the merge call, not a new write. Add "Merged by the night
+   runner at <UTC ISO 8601>." under `## Review fixes`. If the merge is
+   refused, prefix the title `[NEEDS-DECISION] ` and add "Merge refused:
+   <response or reason>." Stop tending.
 
 **Requesting a review.** The native reviewer reviews a pull request when it
 opens and does not review later commits on its own
@@ -378,8 +396,8 @@ Base <sha>, tip <sha>, started and ended (UTC), trigger (schedule or manual)
 | Prompt | Appendix A, verbatim |
 | Schedule | Disabled through R1. From R2, a cron the owner sets, hourly at most, placed away from the owner's other nightly tasks |
 | Connectors | None; remove the defaults when creating the task |
-| Secrets | None. Deployment credentials live in GitHub Actions secrets and are never available to a run |
-| Enforcement | The prompt and this file only. Branch rules cannot stop a session that acts with the owner's access (decision 2026-11-15 "Night runner") |
+| Secrets | None. Deployment credentials live in a GitHub environment limited to `main` and are never available to a run |
+| Enforcement | The prompt, this file and the agent-pipeline-kit gate: the run's own `evaluate` (section 6), and the repository hook that runs the gate again at the merge call where `AGENT_GATE_HOOK` is set. Branch rules cannot stop a session that acts with the owner's access (decision 2026-11-15 "Night runner") |
 | Notifications | Push on completion |
 
 ## 9. Rollout
