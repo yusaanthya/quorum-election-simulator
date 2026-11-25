@@ -105,3 +105,63 @@ morning desk recognizes scheduled merges by that line (its procedure is
 `maintenance/morning-desk.md` in the owner's harness repository); merges the
 owner makes carry no such line. The merge conditions do not change, and the
 "Merged by the night runner at" line in the pull request body stays.
+
+## 2026-11-25 - Night runner tending decided by the kit gate
+
+Owner decision. Section 6 of [night-runner.md](night-runner.md) now takes
+every tending and merge decision from the agent-pipeline-kit gate. After the
+identity rules and the draft and prefix skip, a run fetches the kit commit
+pinned in `.agent-line/manifest.json` on `main`, runs its `evaluate` for the
+pull request, and acts on the verdict and its reasons. The run no longer reads
+`check`, the `Codex Review Gate` status, the section 4.2 paths or the fix-round
+count itself. It merges only when `AGENT_GATE_HOOK` is set in its environment,
+because only then does the repository hook run the gate again at the merge
+call; otherwise it names the pull request in the run summary and leaves it.
+This replaces the merge condition ("when `check` and `Codex Review Gate` both
+pass") and the enforcement bullet of the 2026-11-15 entry "Night runner"; the
+rest of that entry stands.
+
+- **The gate already decided merges.** Pull request #60 installed the manifest
+  and a hook that runs the gate at the runner's merge call where
+  `AGENT_GATE_HOOK` is set, and left the procedure in force unchanged, so a
+  merge needed both. The run that started at 19:50 UTC on 2026-11-24
+  merged #65 (`c500d46`) through the GitHub merge tool on a `main` that has
+  the hook, in the runner's cloud environment, where the owner confirmed the
+  variable is set. A failing hook blocks the call, so the gate said `merge`.
+- **Pin.** The manifest pins kit `3a6181f` and sets `"max_fix_rounds": 3` on
+  the `runner` lane, the cap section 6 counted before. The kit's threat-model
+  changes in `f4bbf2a..3a6181f` were reviewed in kit pull requests #12, #13,
+  #14 and #15.
+- **Claim commit rule removed.** Section 6 no longer requires the oldest
+  commit of the branch to be the empty claim commit `chore: claim <id>`. The
+  kit does not check it, and anyone who can push can write that commit, so it
+  showed only that the branch followed the claim convention. The claim itself
+  is the branch (section 2.3), which stays.
+- **Consequences the owner accepts.**
+  - The run stops reading the `Codex Review Gate` commit status when tending.
+    The kit reads the trusted Codex review itself under
+    `codex_clean: "no_blocking"` (P0 and P1 block, P2 and P3 do not). A review
+    the kit cannot classify (an unknown priority, an unclassifiable summary
+    finding) stays left for the owner, as the status's `error` was, now as
+    `blocked:codex`. The ruleset on `main` still requires the `check` and
+    `Codex Review Gate` statuses, so a merge the kit allows while that status
+    is not `success` is refused and handled as a refused merge in section 6.
+  - A pull request the gate holds is no longer fixed or updated by a run.
+    Before, only a section 4.2 path stopped tending; the gate also holds its
+    other held paths (for example `web/vite.config.*`), the floor, binaries,
+    executables and paths outside the lane's allowlist. Merges were already
+    gated since #60, so what changes is tending, not what can merge.
+  - An open halt issue (`wait:halt`) makes runs wait on every runner pull
+    request.
+  - `blocked:input` from the diff itself (`path-encoding`, `content-missing`)
+    leaves that pull request for the owner instead of stopping the run; only
+    `collect-failed` stops the run, as a failed GitHub query does.
+  - Without the claim-commit rule, a `claude/item-<id>` pull request that no
+    run started (for example, one the owner pushed by hand) is tended and can
+    be merged by a run when the gate says `merge`. It then has not had the
+    run's own critic review (section 5); CI, the Codex review and every gate
+    condition still apply.
+  - At the fix-round cap with one result failed and the other pending, the
+    kit waits, and holds once the pending one fails; before, the pull request
+    was left at once. Every line beginning with `Review-fix-round:` counts,
+    not only a trailer block.
