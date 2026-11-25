@@ -7,7 +7,10 @@ import { mulberry32 } from "./random";
  * (additive blending), so they read as light rather than paint. Each circle has two layers
  * (outer rune bands, then star and medallions) that turn in opposite directions.
  */
-const BIG = 2048;
+/** Size of the drawing space in units, whatever the canvas size. */
+const SPACE = 2048;
+/** Canvas sizes in pixels of a large circle and of a `simple` one. */
+const BIG = 1024;
 const SMALL = 1024;
 
 /** Line colors: the main gold or silver, and the finer accent lines. */
@@ -181,7 +184,7 @@ function texture(size: number, draw: (ctx: CanvasRenderingContext2D) => void) {
   const lctx = lines.getContext("2d")!;
   // Drawing code works in a 2048-unit space centered on the origin.
   lctx.translate(size / 2, size / 2);
-  lctx.scale(size / BIG, size / BIG);
+  lctx.scale(size / SPACE, size / SPACE);
   lctx.lineCap = lctx.lineJoin = "round";
   draw(lctx);
 
@@ -191,7 +194,7 @@ function texture(size: number, draw: (ctx: CanvasRenderingContext2D) => void) {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext("2d")!;
-  const px = size / BIG;
+  const px = size / SPACE;
   for (const [blur, alpha] of [[28, 0.9], [9, 0.8]]) {
     ctx.filter = `blur(${blur * px}px)`;
     ctx.globalAlpha = alpha;
@@ -209,7 +212,7 @@ function texture(size: number, draw: (ctx: CanvasRenderingContext2D) => void) {
 
 type Colors = (typeof sigilSchemes)[SigilScheme];
 type Ctx = CanvasRenderingContext2D;
-const R = (BIG / 2) * 0.95; // Outer radius in drawing units
+const R = (SPACE / 2) * 0.95; // Outer radius in drawing units
 const TAU = Math.PI * 2;
 
 function pen(ctx: Ctx, color: string, width: number) {
