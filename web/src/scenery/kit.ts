@@ -51,8 +51,13 @@ export function matte(color: string, glow = 0) {
   return m;
 }
 
+/** Requested corner radius at or below which one segment looks the same as three on screen. */
+const SMALL_RADIUS = 0.03;
+
+/** A box with rounded corners. Small radii get one corner segment; the choice uses r before clamping. */
 export function roundedBox(w: number, h: number, d: number, r: number) {
-  return new RoundedBoxGeometry(w, h, d, 3, Math.min(r, w / 2, h / 2, d / 2));
+  const segments = r <= SMALL_RADIUS ? 1 : 3;
+  return new RoundedBoxGeometry(w, h, d, segments, Math.min(r, w / 2, h / 2, d / 2));
 }
 
 /** Adds mesh to parent with shadows on, at x, y, z. */
